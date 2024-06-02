@@ -24,23 +24,8 @@ from torch.distributed._tensor import Shard, Replicate, distribute_tensor
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from accelerate import Accelerator
+from torch.profiler import profile, record_function, ProfilerActivity
 
-
-def simple_timeit(f, *args, tries = 10, task = None):
-    '''Simple utility to time a function for multiple runs'''
-    assert task is not None
-
-    outcomes_ms = []
-
-    for _ in range(tries):
-        s = datetime.datetime.now()
-        f(*args)
-        e = datetime.datetime.now()
-        outcomes_ms.append(1000*(e-s).total_seconds())
-
-    average_time_ms = sum(outcomes_ms)/len(outcomes_ms)
-    print(f"{task}: average time milliseconds: {average_time_ms:.2f}")
-    return average_time_ms
 
 # 1. reference implementation from https://github.com/eric-mitchell/direct-preference-optimization/blob/main/trainers.py#L45
 def preference_loss(policy_chosen_logps: torch.FloatTensor,
@@ -256,15 +241,30 @@ if __name__ == "__main__":
     device = accelerator.device
     batch_size = 1
     seq_length = 65536
-    vocab_size = 32000
+    TP = 2
+    vocab_size = 32000 // TP
 
+    print(f"{device=}")
     batch = {
-        "policy_chosen_logps": torch.randn(batch_size, seq_length, vocab_size, dtype=torch.float32),
-        "policy_rejected_logps": torch.randn(batch_size, seq_length, vocab_size, dtype=torch.float32),
-        "reference_chosen_logps": torch.randn(batch_size, seq_length, vocab_size, dtype=torch.float32),
-        "reference_rejected_logps": torch.randn(batch_size, seq_length, vocab_size, dtype=torch.float32),
+        "policy_chosen_logps": torch.randn(batch_size, seq_length, vocab_size, dtype=torch.float32).to(device),
+        "policy_rejected_logps": torch.randn(batch_size, seq_length, vocab_size, dtype=torch.float32).to(device),
+        "reference_chosen_logps": torch.randn(batch_size, seq_length, vocab_size, dtype=torch.float32).to(device),
+        "reference_rejected_logps": torch.randn(batch_size, seq_length, vocab_size, dtype=torch.float32).to(device),
     }
-    data = accelerator.prepare(batch)
-    average_time_ms = simple_timeit(preference_loss, batch["policy_chosen_logps"], batch["policy_rejected_logps"], batch["reference_chosen_logps"], batch["reference_rejected_logps"], 1., task='reference_dpo')
-    average_time_ms = simple_timeit(dpo_loss, batch["policy_chosen_logps"], batch["policy_rejected_logps"], batch["reference_chosen_logps"], batch["reference_rejected_logps"], accelerator.device, task='hf_dpo')
-    average_time_ms = simple_timeit(nemo_dpo_loss, batch["policy_chosen_logps"], batch["policy_rejected_logps"], batch["reference_chosen_logps"], batch["reference_rejected_logps"], task='nemo_dpo')
+    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
+        with record_function("reference_dpo"):
+            preference_loss(batch["policy_chosen_logps"], batch["policy_rejected_logps"], batch["reference_chosen_logps"], batch["reference_rejected_logps"], 1.)
+
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+
+    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
+        with record_function("hf_dpo"):
+            dpo_loss(batch["policy_chosen_logps"], batch["policy_rejected_logps"], batch["reference_chosen_logps"], batch["reference_rejected_logps"], accelerator.device)
+
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+
+    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
+        with record_function("nemo_dpo_loss"):
+            nemo_dpo_loss(batch["policy_chosen_logps"], batch["policy_rejected_logps"], batch["reference_chosen_logps"], batch["reference_rejected_logps"])
+
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))

@@ -1,5 +1,5 @@
-# mac
 torch
 torchvision
 torchaudio
-accelerator
+transformers
+accelerate
