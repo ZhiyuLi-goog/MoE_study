@@ -19,8 +19,6 @@ import torch
 import torch.nn.functional as F
 from typing import Optional, Dict, List, Union, Tuple
 import random
-from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed._tensor import Shard, Replicate, distribute_tensor
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from accelerate import Accelerator
@@ -255,16 +253,16 @@ if __name__ == "__main__":
         with record_function("reference_dpo"):
             preference_loss(batch["policy_chosen_logps"], batch["policy_rejected_logps"], batch["reference_chosen_logps"], batch["reference_rejected_logps"], 1.)
 
-    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
 
     with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
         with record_function("hf_dpo"):
             dpo_loss(batch["policy_chosen_logps"], batch["policy_rejected_logps"], batch["reference_chosen_logps"], batch["reference_rejected_logps"], accelerator.device)
 
-    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
 
     with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
         with record_function("nemo_dpo_loss"):
             nemo_dpo_loss(batch["policy_chosen_logps"], batch["policy_rejected_logps"], batch["reference_chosen_logps"], batch["reference_rejected_logps"])
 
-    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
