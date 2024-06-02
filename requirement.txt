@@ -1,0 +1,5 @@
+# mac
+torch
+torchvision
+torchaudio
+accelerator
