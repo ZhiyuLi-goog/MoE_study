@@ -117,3 +117,27 @@ Self CUDA time total: 169.218ms
 ```
 
 The slight delay observed in the nemo_dpo_loss application, attributed to concat and split_output operations, could potentially enhance MFU during model function calls with larger batch sizes beyond the DPO loss context.
+
+# Dataset Info
+
+```
+python preference_datasets_metrics.py
+```
+## [Stanford Human Preferences Dataset (SHP)](https://huggingface.co/datasets/stanfordnlp/SHP)
+```
+shp: num_samples=198556
+shp: num_tokens_chosen_input=73847785
+shp: num_tokens_rejected_input=59121849
+shp: avg_tokens_chosen_input=371.9242178528979
+shp: avg_tokens_rejected_input=297.75906545256754
+```
+
+## [Anthropic Helpful-Harmless dataset](https://huggingface.co/datasets/Anthropic/hh-rlhf)
+```
+hh: num_samples=160800
+hh: num_tokens_chosen_input=39369144
+hh: num_tokens_rejected_input=38779153
+hh: avg_tokens_chosen_input=244.83298507462686
+hh: avg_tokens_rejected_input=241.1638868159204
+```
+
