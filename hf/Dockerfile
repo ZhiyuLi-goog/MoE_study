@@ -27,6 +27,7 @@ RUN curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key --keyri
 RUN apt-get update && apt-get install -y google-cloud-sdk
 
 RUN pip install hydra-core
+RUN pip install wandb
 
 WORKDIR /app
 
