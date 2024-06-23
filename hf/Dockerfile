@@ -31,7 +31,7 @@ RUN pip install hydra-core
 WORKDIR /app
 
 COPY dev-entrypoint.sh /app
-
-ENTRYPOINT ["/app/dev-entrypoint.sh"]
-
 RUN chmod a+rwx -R /app
+
+SHELL ["/bin/bash", "-c"]
+ENTRYPOINT ["/app/dev-entrypoint.sh"]
