@@ -30,9 +30,9 @@ RUN pip install hydra-core
 
 WORKDIR /app
 
-COPY dev-entrypoint.sh /app
-RUN chmod a+rwx -R /app
-
-SHELL ["/bin/bash", "-c"]
-ENTRYPOINT ["/app/dev-entrypoint.sh"]
-CMD ["bash"]
+# clone current repo
+ARG GIT_REF=main
+RUN git clone https://github.com/ZhiyuLi-goog/MoE_study.git &&
+    cd MoE_study && \
+    echo GIT_REF=${GIT_REF} && \
+    git checkout ${GIT_REF}
