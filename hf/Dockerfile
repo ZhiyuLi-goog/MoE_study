@@ -35,3 +35,4 @@ RUN chmod a+rwx -R /app
 
 SHELL ["/bin/bash", "-c"]
 ENTRYPOINT ["/app/dev-entrypoint.sh"]
+CMD ["bash"]
