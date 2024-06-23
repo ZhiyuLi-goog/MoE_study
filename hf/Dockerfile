@@ -32,4 +32,4 @@ WORKDIR /app
 
 COPY dev-entrypoint.sh /app
 
-ENTRYPOINT ["dev-entrypoint.sh"]
+ENTRYPOINT ["/app/dev-entrypoint.sh"]
