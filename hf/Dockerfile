@@ -32,7 +32,7 @@ WORKDIR /app
 
 # clone current repo
 ARG GIT_REF=main
-RUN git clone https://github.com/ZhiyuLi-goog/MoE_study.git &&
+RUN git clone https://github.com/ZhiyuLi-goog/MoE_study.git && \
     cd MoE_study && \
     echo GIT_REF=${GIT_REF} && \
     git checkout ${GIT_REF}
