@@ -15,6 +15,7 @@ from psutil import Process
 import torch
 import torch_xla.utils.utils as xu
 import torch_xla.distributed.spmd as xs
+import torch_xla.distributed.parallel_loader as pl
 
 
 def fmt_size(num_bytes: int) -> str:
