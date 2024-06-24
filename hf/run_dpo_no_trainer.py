@@ -161,13 +161,13 @@ def get_batch_logps(
 
         return (per_token_logps * loss_mask).sum(-1), loss_mask.sum(-1)
 
-def create_concatenate_batch(batch: Dict[str, Union[List, torch.LongTensor]]):
+def create_concatenated_batch(batch: Dict[str, Union[List, torch.LongTensor]]):
     # all items in batch are the same in length
-    concatenate_batch = {}
-    concatenate_batch["concatenated_input_ids"] = torch.cat((batch["chosen_input_ids"], batch["rejected_input_ids"]), dim=0)
-    concatenate_batch["concatenated_attention_mask"] = torch.cat((batch["chosen_attention_mask"], batch["rejected_attention_mask"]), dim=0)
-    concatenate_batch["concatenated_labels"] = torch.cat((batch["chosen_labels"], batch["rejected_labels"]), dim=0)
-    return concatenate_batch
+    concatenated_batch = {}
+    concatenated_batch["concatenated_input_ids"] = torch.cat((batch["chosen_input_ids"], batch["rejected_input_ids"]), dim=0)
+    concatenated_batch["concatenated_attention_mask"] = torch.cat((batch["chosen_attention_mask"], batch["rejected_attention_mask"]), dim=0)
+    concatenated_batch["concatenated_labels"] = torch.cat((batch["chosen_labels"], batch["rejected_labels"]), dim=0)
+    return concatenated_batch
 
 def concatenated_forward(
         model: nn.Module, batch: Dict[str, Union[List, torch.LongTensor]], label_pad_token_id: int = -100,
@@ -176,7 +176,7 @@ def concatenated_forward(
 
         We do this to avoid doing two forward passes, because it's faster for FSDP.
         """
-        concatenate_batch = create_concatenate_batch(batch)
+        concatenated_batch = create_concatenated_batch(batch)
         len_chosen = concatenated_batch["concatenated_input_ids"].shape[0] // 2
         all_logits = model(
             concatenated_batch["concatenated_input_ids"],
