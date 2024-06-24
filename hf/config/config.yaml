@@ -100,8 +100,8 @@ minimum_log_interval_secs: 1.0
 # num of process in data processing
 num_proc: 1
 xla_metric_report: False
-
-
 concatenated_forward: True
 profile_logdir: null
 profile_step: null
+
+checkpoint_manager_path: null

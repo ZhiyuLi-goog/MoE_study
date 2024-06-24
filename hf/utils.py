@@ -19,7 +19,7 @@ import torch_xla.distributed.spmd as xs
 import torch_xla.distributed.parallel_loader as pl
 from torch.utils.data import DataLoader
 from transformers import default_data_collator
-
+import torch
 
 def fmt_size(num_bytes: int) -> str:
   assert num_bytes > 0

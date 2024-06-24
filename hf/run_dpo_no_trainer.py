@@ -46,6 +46,7 @@ import getpass
 from transformers import set_seed
 from utils import get_synthetic_data_device_iterator, get_data_device_iterator, get_cpu_memory
 import torch_xla.debug.metrics as met
+from torch_xla.experimental.distributed_checkpoint import CheckpointManager
 
 OmegaConf.register_new_resolver("get_local_run_dir", lambda exp_name, local_dir: get_local_run_dir(exp_name, local_dir))
 logger = logging.get_logger(__name__)
@@ -470,6 +471,21 @@ def main(config: DictConfig):
     global_batch_size = config.per_device_train_batch_size * num_devices
     # 'chosen_input_ids', 'chosen_attention_mask', 'rejected_input_ids', 'rejected_attention_mask', 'chosen_labels', 'rejected_labels'
 
+    torch.distributed.init_process_group('gloo', init_method='xla://')
+    if config.checkpoint_manager_path:
+        ckpt_manager = CheckpointManager(
+            path=config.checkpoint_manager_path,
+            save_interval=float('inf'),
+            max_to_keep=0,
+        )
+
+        state_dict = {
+            'model': model.state_dict(),
+        }
+        ckpt_manager.restore(0, state_dict)
+        model.load_state_dict(state_dict['model'])
+        logger.info("checkpoint loaded")
+
     start_step = 0
     tracker = xm.RateTracker()
 
@@ -492,6 +508,11 @@ def main(config: DictConfig):
             xm.wait_device_ops()
             import tempfile
             xp.trace_detached('127.0.0.1:9012', config.get("profile_logdir", tempfile.mkdtemp()), config.get("profile_duration", 20000))
+
+        state_dict = {
+            'model': model.state_dict(),
+        }
+
 
     if config.xla_metric_report:
         logger.info(met.metrics_report())
