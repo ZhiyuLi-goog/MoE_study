@@ -408,11 +408,19 @@ def main(config: DictConfig):
     # 'chosen_input_ids', 'chosen_attention_mask', 'rejected_input_ids', 'rejected_attention_mask', 'chosen_labels', 'rejected_labels'
 
     torch.distributed.init_process_group('gloo', init_method='xla://')
-    ckpt_manager = CheckpointManager(
-        path=config.checkpoint_manager_path,
-        save_interval=config.save_interval,
-        max_to_keep=config.max_to_keep,
-    )
+    if config.checkpoint_manager_path:
+        ckpt_manager = CheckpointManager(
+            path=config.checkpoint_manager_path,
+            save_interval=config.save_interval,
+            max_to_keep=config.max_to_keep,
+        )
+
+        state_dict = {
+            'model': model.state_dict(),
+        }
+        ckpt_manager.restore(0, state_dict)
+        model.load_state_dict(state_dict['model'])
+        logger.info("checkpoint loaded")
 
     start_step = 0
     tracker = xm.RateTracker()
