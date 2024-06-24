@@ -53,7 +53,7 @@ logger = logging.get_logger(__name__)
 
 def print_param_sharding(model):
     for name, param in model.named_parameters():
-        logger.info(f"{name}: {torch_xla._XLAC._get_xla_sharding_spec(param)}")
+        logger.info(f"{name}: {param.shape} {param.dtype} {torch_xla._XLAC._get_xla_sharding_spec(param)}")
 
 def get_local_dir(prefix: str) -> str:
     """Return the path to the cache directory for this user."""
