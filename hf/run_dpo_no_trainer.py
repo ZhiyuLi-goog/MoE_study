@@ -45,6 +45,7 @@ import os
 import getpass
 from transformers import set_seed
 from utils import get_synthetic_data_device_iterator, get_data_device_iterator, get_cpu_memory
+import torch_xla.debug.metrics as met
 
 def get_local_dir(prefix: str) -> str:
     """Return the path to the cache directory for this user."""
@@ -423,6 +424,8 @@ def main(config: DictConfig):
             xm.add_step_closure(
                 report_metrics, args=(step, loss, tracker, metrics))
 
+    if config.xla_metric_report:
+        logger.info(met.metrics_report())
 
 if __name__ == '__main__':
     main()

@@ -29,6 +29,9 @@ RUN apt-get update && apt-get install -y google-cloud-sdk
 RUN pip install hydra-core
 RUN pip install wandb
 
+# checkpoint loading in gcs
+RUN pip install gcsfs
+
 WORKDIR /app
 
 # clone current repo
