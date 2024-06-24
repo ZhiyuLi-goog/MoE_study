@@ -13,6 +13,7 @@ import numpy as np
 from functools import partial
 from psutil import Process
 import torch
+import torch_xla
 import torch_xla.utils.utils as xu
 import torch_xla.distributed.spmd as xs
 import torch_xla.distributed.parallel_loader as pl
