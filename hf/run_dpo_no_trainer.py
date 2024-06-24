@@ -413,8 +413,8 @@ def main(config: DictConfig):
         tracker.add(global_batch_size)
 
         loss.backward()
-        grad_norm = clip_gradient(model, config)
-        metrics['grad_norm'] = grad_norm
+        # grad_norm = clip_gradient(model, config)
+        # metrics['grad_norm'] = grad_norm
         optimizer.step()
         scheduler.step()
         optimizer.zero_grad()
