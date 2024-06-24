@@ -411,7 +411,7 @@ def main(config: DictConfig):
     ckpt_manager = CheckpointManager(
         path=config.checkpoint_manager_path,
         save_interval=config.save_interval,
-        max_to_keep=config.save_total_limit,
+        max_to_keep=config.max_to_keep,
     )
 
     start_step = 0
