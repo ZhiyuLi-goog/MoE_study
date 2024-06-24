@@ -23,7 +23,6 @@ from torch_xla.experimental.spmd_fully_sharded_data_parallel import (
 )
 
 from torch_xla.distributed.fsdp import checkpoint_module
-import torch_xla.distributed.parallel_loader as pl
 
 from torch_xla.distributed.fsdp.wrap import (
     size_based_auto_wrap_policy,
@@ -408,9 +407,9 @@ def main(config: DictConfig):
         tokenizer.chat_template = "{% for message in messages %}{{message['role'] + ': ' + message['content'] + '\n\n'}}{% endfor %}{{ eos_token }}"
 
     if config.use_synthetic_data:
-        train_device_loader, eval_device_loader = get_synthetic_data_device_iterator(config, tokenizer)
+        train_device_loader, eval_device_loader = get_synthetic_data_device_iterator(config, tokenizer, mesh)
     else:
-        train_device_loader, eval_device_loader = get_data_device_iterator(config, tokenizer)
+        train_device_loader, eval_device_loader = get_data_device_iterator(config, tokenizer, mesh)
 
     global_batch_size = config.per_device_train_batch_size * num_devices
     # 'chosen_input_ids', 'chosen_attention_mask', 'rejected_input_ids', 'rejected_attention_mask', 'chosen_labels', 'rejected_labels'
