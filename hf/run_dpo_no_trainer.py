@@ -365,6 +365,7 @@ def main(config: DictConfig):
 
     model_torch_dtype = getattr(torch, config.model.torch_dtype)
 
+    logger.info(f"cpu memory usage: {get_cpu_memory()}")
     logger.info("loading model")
     if config.model.config_path:
         model_config = AutoConfig.from_pretrained(config.model.config_path)

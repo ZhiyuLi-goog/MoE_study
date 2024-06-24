@@ -12,7 +12,7 @@ from transformers import (
 import numpy as np
 from functools import partial
 from psutil import Process
-
+import torch
 
 
 def fmt_size(num_bytes: int) -> str:
