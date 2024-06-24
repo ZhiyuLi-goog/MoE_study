@@ -13,6 +13,8 @@ import numpy as np
 from functools import partial
 from psutil import Process
 import torch
+import torch_xla.utils.utils as xu
+import torch_xla.distributed.spmd as xs
 
 
 def fmt_size(num_bytes: int) -> str:
