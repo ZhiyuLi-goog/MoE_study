@@ -161,7 +161,7 @@ def get_batch_logps(
 
         return (per_token_logps * loss_mask).sum(-1), loss_mask.sum(-1)
 
-def concatenate_batch(batch: Dict[str, Union[List, torch.LongTensor]]):
+def create_concatenate_batch(batch: Dict[str, Union[List, torch.LongTensor]]):
     # all items in batch are the same in length
     global_batch_size = config.per_device_train_batch_size * num_devices
     data = {
@@ -187,7 +187,7 @@ def concatenated_forward(
 
         We do this to avoid doing two forward passes, because it's faster for FSDP.
         """
-        concatenate_batch = concatenate_batch(batch)
+        concatenate_batch = create_concatenate_batch(batch)
         len_chosen = concatenated_batch["concatenated_input_ids"].shape[0] // 2
         all_logits = model(
             concatenated_batch["concatenated_input_ids"],
