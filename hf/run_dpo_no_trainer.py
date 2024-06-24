@@ -45,8 +45,8 @@ import torch
 from datetime import datetime
 import os
 import getpass
-from datasets import load_dataset
 from transformers import set_seed
+from utils import get_synthetic_data_device_iterator, get_data_device_iterator, get_cpu_memory
 
 def get_local_dir(prefix: str) -> str:
     """Return the path to the cache directory for this user."""
@@ -163,14 +163,33 @@ def get_batch_logps(
 
         return (per_token_logps * loss_mask).sum(-1), loss_mask.sum(-1)
 
+def concatenate_batch(batch: Dict[str, Union[List, torch.LongTensor]]):
+    # all items in batch are the same in length
+    global_batch_size = config.per_device_train_batch_size * num_devices
+    data = {
+        "chosen_input_ids": torch.randint(tokenizer.vocab_size, (global_batch_size, config.max_length), dtype=torch.int64),
+        "chosen_attention_mask": torch.ones(global_batch_size * 2, config.max_length, dtype=torch.int64),
+        "rejected_input_ids": torch.randint(tokenizer.vocab_size, (global_batch_size, config.max_length), dtype=torch.int64),
+        "rejected_attention_mask": torch.ones(global_batch_size * 2, config.max_length, dtype=torch.int64),
+    }
+    data["chosen_labels"] = data["chosen_input_ids"]
+    data["rejected_labels"] = data["rejected_input_ids"]
+    data["chosen_labels"][:, :config.max_length // 2] = config.label_pad_token_id
+    data["rejected_labels"][:, :config.max_length // 2] = config.label_pad_token_id
+    concatenate_batch = {}
+    concatenate_batch["concatenated_input_ids"] = torch.cat((batch["chosen_input_ids"], batch["rejected_input_ids"]), dim=0)
+    concatenate_batch["concatenated_attention_mask"] = torch.cat((batch["chosen_attention_mask"], batch["rejected_attention_mask"]), dim=0)
+    concatenate_batch["concatenated_labels"] = torch.cat((batch["chosen_labels"], batch["rejected_labels"]), dim=0)
+    return concatenate_batch
 
 def concatenated_forward(
-        model: nn.Module, concatenated_batch: Dict[str, Union[List, torch.LongTensor]], label_pad_token_id: int = -100,
+        model: nn.Module, batch: Dict[str, Union[List, torch.LongTensor]], label_pad_token_id: int = -100,
     ) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
         """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
 
         We do this to avoid doing two forward passes, because it's faster for FSDP.
         """
+        concatenate_batch = concatenate_batch(batch)
         len_chosen = concatenated_batch["concatenated_input_ids"].shape[0] // 2
         all_logits = model(
             concatenated_batch["concatenated_input_ids"],
@@ -345,6 +364,8 @@ def main(config: DictConfig):
     xs.set_global_mesh(mesh)
 
     model_torch_dtype = getattr(torch, config.model.torch_dtype)
+
+    logger.info("loading model")
     if config.model.config_path:
         model_config = AutoConfig.from_pretrained(config.model.config_path)
         model_config.static = True
@@ -355,21 +376,30 @@ def main(config: DictConfig):
         model = AutoModelForCausalLM.from_pretrained(
             config.model.name_or_path, cache_dir=config.cache_local_dir, low_cpu_mem_usage=True, torch_dtype=model_torch_dtype)
     
+    logger.info("model loaded")
     model = prepare_model(model, config)
-    gc.collect()
-    optimizer = getattr(torch.optim, config.optimizer)(model.parameters(), lr=config.lr)
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda step: min(1.0, (step + 1) / (config.warmup_steps + 1)))
 
+    logger.info("model prepared")
+    gc.collect()
+    logger.info(f"cpu memory usage: {get_cpu_memory()}")
+
+    logger.info("loading ref_model")
     if config.model.config_path:
         ref_model = AutoModelForCausalLM.from_config(model_config)
         ref_model = ref_model.to(model_torch_dtype)
     else:
         ref_model = AutoModelForCausalLM.from_pretrained(
             config.model.name_or_path, cache_dir=config.cache_local_dir, low_cpu_mem_usage=True, torch_dtype=model_torch_dtype)
+    logger.info("ref_model loaded")
     ref_model.eval()
-
     ref_model = prepare_model(ref_model, config)
+
+    logger.info("ref_model prepared")
     gc.collect()
+    logger.info(f"cpu memory usage: {get_cpu_memory()}")
+
+    optimizer = getattr(torch.optim, config.optimizer)(model.parameters(), lr=config.lr)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda step: min(1.0, (step + 1) / (config.warmup_steps + 1)))
 
     tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
     if tokenizer.pad_token is None:
@@ -377,41 +407,14 @@ def main(config: DictConfig):
     if tokenizer.chat_template is None:
         tokenizer.chat_template = "{% for message in messages %}{{message['role'] + ': ' + message['content'] + '\n\n'}}{% endfor %}{{ eos_token }}"
 
+    if config.use_synthetic_data:
+        train_device_loader, eval_device_loader = get_synthetic_data_device_iterator(config, tokenizer)
+    else:
+        train_device_loader, eval_device_loader = get_data_device_iterator(config, tokenizer)
+
     global_batch_size = config.per_device_train_batch_size * num_devices
     # 'chosen_input_ids', 'chosen_attention_mask', 'rejected_input_ids', 'rejected_attention_mask', 'chosen_labels', 'rejected_labels'
-    if config.use_synthetic_data:
-        data = {
-            "concatenated_input_ids": torch.randint(tokenizer.vocab_size, (global_batch_size * 2, config.max_seq_len), dtype=torch.int64),
-            "concatenated_attention_mask": torch.ones(global_batch_size * 2, config.max_seq_len, dtype=torch.int64),
-        }
-        data["concatenated_labels"] = data["concatenated_input_ids"]
-        data["concatenated_labels"][:, :config.max_seq_len // 2] = config.label_pad_token_id
-        train_loader = xu.SampleGenerator(
-            data = data,
-            sample_count=100,
-        )
-        train_device_loader = pl.MpDeviceLoader(
-            train_loader,
-            torch_xla.device(),
-            # Shard the input's batch dimension along the `fsdp` axis, no sharding along other dimensions
-            input_sharding=xs.ShardingSpec(mesh, ('fsdp', None)))
-        train_device_loader = iter(train_device_loader)
-    else:
-        ds = load_dataset(config.datasets)
-        for key in ds:
-            ds[key] = ds[key].select(range(50))
 
-        def process(row):
-            row["chosen"] = tokenizer.apply_chat_template(row["chosen"], tokenize=False)
-            row["rejected"] = tokenizer.apply_chat_template(row["rejected"], tokenize=False)
-            return row
-
-        ds = ds.map(
-            process,
-            num_proc=1,
-            load_from_cache_file=False,
-        )
-    
     start_step = 0
     tracker = xm.RateTracker()
     for step in np.arange(start_step, config.max_steps):
