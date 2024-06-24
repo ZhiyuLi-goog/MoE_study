@@ -163,17 +163,6 @@ def get_batch_logps(
 
 def create_concatenate_batch(batch: Dict[str, Union[List, torch.LongTensor]]):
     # all items in batch are the same in length
-    global_batch_size = config.per_device_train_batch_size * num_devices
-    data = {
-        "chosen_input_ids": torch.randint(tokenizer.vocab_size, (global_batch_size, config.max_length), dtype=torch.int64),
-        "chosen_attention_mask": torch.ones(global_batch_size * 2, config.max_length, dtype=torch.int64),
-        "rejected_input_ids": torch.randint(tokenizer.vocab_size, (global_batch_size, config.max_length), dtype=torch.int64),
-        "rejected_attention_mask": torch.ones(global_batch_size * 2, config.max_length, dtype=torch.int64),
-    }
-    data["chosen_labels"] = data["chosen_input_ids"]
-    data["rejected_labels"] = data["rejected_input_ids"]
-    data["chosen_labels"][:, :config.max_length // 2] = config.label_pad_token_id
-    data["rejected_labels"][:, :config.max_length // 2] = config.label_pad_token_id
     concatenate_batch = {}
     concatenate_batch["concatenated_input_ids"] = torch.cat((batch["chosen_input_ids"], batch["rejected_input_ids"]), dim=0)
     concatenate_batch["concatenated_attention_mask"] = torch.cat((batch["chosen_attention_mask"], batch["rejected_attention_mask"]), dim=0)
