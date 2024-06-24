@@ -47,6 +47,14 @@ from transformers import set_seed
 from utils import get_synthetic_data_device_iterator, get_data_device_iterator, get_cpu_memory
 import torch_xla.debug.metrics as met
 
+OmegaConf.register_new_resolver("get_local_run_dir", lambda exp_name, local_dir: get_local_run_dir(exp_name, local_dir))
+logger = logging.get_logger(__name__)
+
+
+def print_param_sharding(model):
+    for name, param in model.named_parameters():
+        logger.info(f"{name}: {torch_xla._XLAC._get_xla_sharding_spec(param)}")
+
 def get_local_dir(prefix: str) -> str:
     """Return the path to the cache directory for this user."""
     if os.path.exists(prefix):
@@ -116,9 +124,6 @@ def get_local_run_dir(exp_name: str, local_dir: str) -> str:
     run_dir = f"{get_local_dir(local_dir)}/{exp_name}_{timestamp}"
     os.makedirs(run_dir, exist_ok=True)
     return run_dir
-
-OmegaConf.register_new_resolver("get_local_run_dir", lambda exp_name, local_dir: get_local_run_dir(exp_name, local_dir))
-logger = logging.get_logger(__name__)
 
 
 def sequence_mask(lengths, maxlen=None, dtype=torch.bool):
@@ -368,7 +373,7 @@ def main(config: DictConfig):
     logger.info("model loaded")
     model = prepare_model(model, config)
     logger.info("model prepared")
-    logger.info(f"{model=}")
+    print_param_sharding(model)
 
     gc.collect()
     xm.mark_step()
@@ -386,7 +391,7 @@ def main(config: DictConfig):
     ref_model = prepare_model(ref_model, config)
 
     logger.info("ref_model prepared")
-    logger.info(f"{ref_model=}")
+    print_param_sharding(ref_model)
     gc.collect()
     xm.mark_step()
     logger.info(f"cpu memory usage: {get_cpu_memory()}")
