@@ -122,7 +122,7 @@ def build_tokenized_answer(prompt, answer):
     )
 
 
-def tokenize_row(feature, truncation_mode="keep_start", max_length=512, max_prompt_length=256) -> Dict:
+def tokenize_row(feature, tokenizer=None, truncation_mode="keep_start", max_length=512, max_prompt_length=256) -> Dict:
     """Tokenize a single row from a DPO specific dataset.
 
     At this stage, we don't convert to PyTorch tensors yet; we just handle the truncation
@@ -265,7 +265,7 @@ def get_data_device_iterator(config, tokenizer, mesh):
         load_from_cache_file=False,
     )
 
-    ds = ds.map(partial(tokenize_row, max_prompt_length=config.max_prompt_length, max_length=config.max_length), num_proc=num_proc)
+    ds = ds.map(partial(tokenize_row, tokenizer=tokenizer, max_prompt_length=config.max_prompt_length, max_length=config.max_length), num_proc=num_proc)
 
     ds = ds.select_columns(
         ['chosen_input_ids', 'chosen_attention_mask', 'chosen_labels', 'rejected_input_ids', 'rejected_attention_mask', 'rejected_labels']
