@@ -71,7 +71,7 @@ def get_synthetic_data_device_iterator(config, tokenizer, mesh):
     return convert_device_iterator(train_loader, mesh), convert_device_iterator(eval_loader, mesh)
 
 
-def build_tokenized_answer(prompt, answer):
+def build_tokenized_answer(tokenizer, prompt, answer):
     """
     Llama tokenizer does satisfy `enc(a + b) = enc(a) + enc(b)`.
     It does ensure `enc(a + b) = enc(a) + enc(a + b)[len(enc(a)):]`.
@@ -151,11 +151,11 @@ def tokenize_row(feature, tokenizer=None, truncation_mode="keep_start", max_leng
 
     if not isinstance(chosen, str):
         raise ValueError(f"chosen should be an str but got {type(chosen)}")
-    chosen_tokens = build_tokenized_answer(prompt, chosen)
+    chosen_tokens = build_tokenized_answer(tokenizer, prompt, chosen)
 
     if not isinstance(rejected, str):
         raise ValueError(f"rejected should be an str but got {type(rejected)}")
-    rejected_tokens = build_tokenized_answer(prompt, rejected)
+    rejected_tokens = build_tokenized_answer(tokenizer, prompt, rejected)
 
     # Last prompt token might get merged by tokenizer and
     # it should not be included for generation if that happens
