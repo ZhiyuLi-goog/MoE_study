@@ -18,6 +18,7 @@ import torch_xla.utils.utils as xu
 import torch_xla.distributed.spmd as xs
 import torch_xla.distributed.parallel_loader as pl
 from torch.utils.data import DataLoader
+from transformers import default_data_collator
 
 
 def fmt_size(num_bytes: int) -> str:
@@ -287,7 +288,7 @@ def get_data_device_iterator(config, tokenizer, mesh):
     
     ds = ds.map(partial(pad_sequence, max_length=config.max_length), num_proc=num_proc)
 
-    train_loader, eval_loader = DataLoader(ds['train'], shuffle=True, drop_last=True), DataLoader(ds['test'])
+    train_loader, eval_loader = DataLoader(ds['train'], shuffle=True, drop_last=True, collate_fn=default_data_collator), DataLoader(ds['test'], collate_fn=default_data_collator)
     return convert_device_iterator(train_loader, mesh), convert_device_iterator(eval_loader, mesh)
 
 
