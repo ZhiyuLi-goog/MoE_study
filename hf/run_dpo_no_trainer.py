@@ -406,6 +406,13 @@ def main(config: DictConfig):
     global_batch_size = config.per_device_train_batch_size * num_devices
     # 'chosen_input_ids', 'chosen_attention_mask', 'rejected_input_ids', 'rejected_attention_mask', 'chosen_labels', 'rejected_labels'
 
+    torch.distributed.init_process_group('gloo', init_method='xla://')
+    ckpt_manager = CheckpointManager(
+        path=config.checkpoint_manager_path,
+        save_interval=config.save_interval,
+        max_to_keep=config.save_total_limit,
+    )
+
     start_step = 0
     tracker = xm.RateTracker()
     for step in np.arange(start_step, config.max_steps):
@@ -423,6 +430,12 @@ def main(config: DictConfig):
         if step > start_step and step % config.report_metrics_freq == 0:
             xm.add_step_closure(
                 report_metrics, args=(step, loss, tracker, metrics))
+
+        state_dict = {
+            'model': model.state_dict(),
+        }
+        ckpt_manager.save_async(step, state_dict)
+
 
     if config.xla_metric_report:
         logger.info(met.metrics_report())

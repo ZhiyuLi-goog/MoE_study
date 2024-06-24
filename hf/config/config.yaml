@@ -100,3 +100,7 @@ minimum_log_interval_secs: 1.0
 # num of process in data processing
 num_proc: 1
 xla_metric_report: False
+
+checkpoint_manager_path: "gs://lizhiyu-multipods/moe/checkpoints"
+save_interval: 5
+max_to_keep: 1
