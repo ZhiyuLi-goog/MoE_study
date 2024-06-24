@@ -367,8 +367,9 @@ def main(config: DictConfig):
     
     logger.info("model loaded")
     model = prepare_model(model, config)
-
     logger.info("model prepared")
+    logger.info(f"{model=}")
+
     gc.collect()
     xm.mark_step()
     logger.info(f"cpu memory usage: {get_cpu_memory()}")
@@ -385,6 +386,7 @@ def main(config: DictConfig):
     ref_model = prepare_model(ref_model, config)
 
     logger.info("ref_model prepared")
+    logger.info(f"{ref_model=}")
     gc.collect()
     xm.mark_step()
     logger.info(f"cpu memory usage: {get_cpu_memory()}")
