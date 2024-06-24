@@ -68,7 +68,7 @@ def get_synthetic_data_device_iterator(config, tokenizer, mesh):
         sample_count=10,
     )
 
-    return convert_device_iterator(train_loader), convert_device_iterator(eval_loader)
+    return convert_device_iterator(train_loader, mesh), convert_device_iterator(eval_loader, mesh)
 
 
 def build_tokenized_answer(prompt, answer):
@@ -286,7 +286,7 @@ def get_data_device_iterator(config, tokenizer, mesh):
     ds = ds.map(partial(pad_sequence, max_length=config.max_length), num_proc=num_proc)
 
     train_loader, eval_loader = DataLoader(ds['train'], shuffle=True, drop_last=True), DataLoader(ds['test'])
-    return convert_device_iterator(train_loader), convert_device_iterator(eval_loader)
+    return convert_device_iterator(train_loader, mesh), convert_device_iterator(eval_loader, mesh)
 
 
 
