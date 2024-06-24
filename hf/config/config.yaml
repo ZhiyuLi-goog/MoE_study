@@ -98,3 +98,5 @@ eval_every: 20_000
 # prevent wandb from logging more than once per minimum_log_interval_secs
 minimum_log_interval_secs: 1.0
 
+# num of process in data processing
+num_proc: 1

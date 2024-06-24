@@ -33,7 +33,7 @@ def get_cpu_memory() -> str:
   cpu_bytes = Process().memory_info().rss
   return fmt_size(cpu_bytes)
 
-def convert_device_iterator(data_loader):
+def convert_device_iterator(data_loader, mesh):
     device_loader = pl.MpDeviceLoader(
         data_loader,
         torch_xla.device(),
@@ -42,7 +42,7 @@ def convert_device_iterator(data_loader):
     return iter(device_loader)
 
 
-def get_synthetic_data_device_iterator(config, tokenizer):
+def get_synthetic_data_device_iterator(config, tokenizer, mesh):
     # Shard the input(data parallel).
     # Scale the batch size with num_devices since there will be only one
     # process that handles all runtime devices.
@@ -249,9 +249,10 @@ def tokenize_row(feature, model: Optional[Union[PreTrainedModel, nn.Module]] = N
 
     return batch
 
-def get_data_device_iterator(config, tokenizer, num_proc: int = 1):
+def get_data_device_iterator(config, tokenizer, mesh):
 
     ds = load_dataset(config.datasets)
+    num_proc = config.num_proc
     def process(row):
         row["chosen"] = tokenizer.apply_chat_template(row["chosen"], tokenize=False)
         row["rejected"] = tokenizer.apply_chat_template(row["rejected"], tokenize=False)
