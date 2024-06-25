@@ -351,9 +351,9 @@ def main(config: DictConfig):
         OmegaConf.save(config, f)
 
     num_devices = xr.global_runtime_device_count()
-    mesh_shape = (num_devices, 1)
+    mesh_shape = (num_devices // config.seq_parallelism // config.tensor_parallelism, config.seq_parallelism, config.tensor_parallelism)
     device_ids = np.array(range(num_devices))
-    mesh = xs.Mesh(device_ids, mesh_shape, axis_names=("fsdp", "tensor") )
+    mesh = xs.Mesh(device_ids, mesh_shape, axis_names=("fsdp", "seq", "tensor"))
     xs.set_global_mesh(mesh)
 
     model_torch_dtype = getattr(torch, config.model.torch_dtype)
