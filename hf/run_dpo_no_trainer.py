@@ -355,7 +355,8 @@ def prepare_model(model, config):
             transformer_layer_cls=transformer_cls_to_wrap,
         )
 
-    if config.model.fsdp_config["xla_fsdp_grad_ckpt"]:
+    # if config.model.fsdp_config["xla_fsdp_grad_ckpt"]:
+    if False:
         if model.config.use_cache:
             logger.warning_once(
                 "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`."
