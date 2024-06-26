@@ -100,5 +100,3 @@ minimum_log_interval_secs: 1.0
 # num of process in data processing
 num_proc: 1
 xla_metric_report: False
-seq_parallelism: 1
-tensor_parallelism: 1
