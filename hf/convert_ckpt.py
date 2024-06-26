@@ -63,7 +63,7 @@ def main(config: DictConfig):
         model_config.flash_attention = True
         with torch.device("meta"):
             model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(model_torch_dtype)
-        model = model.init_weights()
+        model.init_weights()
     else:
         model = AutoModelForCausalLM.from_pretrained(
             config.model.name_or_path, cache_dir=config.cache_local_dir, low_cpu_mem_usage=True, torch_dtype=model_torch_dtype)
@@ -88,8 +88,12 @@ def main(config: DictConfig):
             'model': model.state_dict(),
         }
 
-        ckpt_manager.save_async(0, state_dict)
+        ckpt_manager.save(0, state_dict)
     else:
         raise ValueError("need valid {config.checkpoint_manager_path=}")
     
     logger.info("checkpoing saving finished.")
+
+
+if __name__ == '__main__':
+    main()
