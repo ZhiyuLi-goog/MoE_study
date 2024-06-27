@@ -50,6 +50,16 @@ import torch_xla.debug.metrics as met
 OmegaConf.register_new_resolver("get_local_run_dir", lambda exp_name, local_dir: get_local_run_dir(exp_name, local_dir))
 logger = logging.get_logger(__name__)
 
+import torch_xla.core.xla_model as xm
+import torch_xla.debug.metrics as met
+
+import torch_xla.distributed.spmd as xs
+import torch_xla.runtime as xr
+
+import torch_xla.debug.profiler as xp
+server = xp.start_server(9012)
+print(f'Profiling server started: {str(server)}')
+
 
 def print_param_sharding(model):
     for name, param in model.named_parameters():
@@ -462,6 +472,7 @@ def main(config: DictConfig):
 
     start_step = 0
     tracker = xm.RateTracker()
+
     for step in np.arange(start_step, config.max_steps):
         batch = next(train_device_loader)
         loss, metrics = get_batch_loss_metrics(model, ref_model, batch, "train", beta=config.beta, config=config)
@@ -477,6 +488,10 @@ def main(config: DictConfig):
         if step > start_step and step % config.report_metrics_freq == 0:
             xm.add_step_closure(
                 report_metrics, args=(step, loss, tracker, metrics))
+        if step == config.get("profile_step", None):
+            xm.wait_device_ops()
+            import tempfile
+            xp.trace_detached('127.0.0.1:9012', config.get("profile_logdir", tempfile.mkdtemp()), config.get("profile_duration", 20000))
 
     if config.xla_metric_report:
         logger.info(met.metrics_report())
