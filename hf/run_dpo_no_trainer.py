@@ -439,7 +439,11 @@ def main(config: DictConfig):
     xm.mark_step()
     logger.info(f"cpu memory usage: {get_cpu_memory()}")
 
-    optimizer = getattr(torch.optim, config.optimizer)(model.parameters(), lr=config.lr)
+    if config.optimizer == "ADAMW_TORCH_XLA":
+        from torch_xla.amp.syncfree import AdamW
+        optimizer = AdamW(model.parameters(), lr=config.lr)
+    else:
+        optimizer = getattr(torch.optim, config.optimizer)(model.parameters(), lr=config.lr)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda step: min(1.0, (step + 1) / (config.warmup_steps + 1)))
 
     tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
