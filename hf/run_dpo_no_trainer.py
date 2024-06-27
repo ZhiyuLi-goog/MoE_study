@@ -462,8 +462,8 @@ def main(config: DictConfig):
 
     start_step = 0
     tracker = xm.RateTracker()
-    for step in np.arange(start_step, config.max_steps):
-        batch = next(train_device_loader)
+    for step, batch in enumerate(train_device_loader):
+        optimizer.zero_grad()
         loss, metrics = get_batch_loss_metrics(model, ref_model, batch, "train", beta=config.beta, config=config)
         tracker.add(global_batch_size)
 
@@ -472,11 +472,12 @@ def main(config: DictConfig):
         # metrics['grad_norm'] = grad_norm
         optimizer.step()
         scheduler.step()
-        optimizer.zero_grad()
         
         if step > start_step and step % config.report_metrics_freq == 0:
             xm.add_step_closure(
                 report_metrics, args=(step, loss, tracker, metrics))
+        if step >= config.max_steps:
+            break
 
     if config.xla_metric_report:
         logger.info(met.metrics_report())
