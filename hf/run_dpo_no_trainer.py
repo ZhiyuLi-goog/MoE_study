@@ -423,15 +423,16 @@ def main(config: DictConfig):
     logger.info(f"cpu memory usage: {get_cpu_memory()}")
 
     logger.info("loading ref_model")
-    if config.model.config_path:
-        with torch.device("meta"):
-            ref_model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(model_torch_dtype)
-    else:
-        ref_model = AutoModelForCausalLM.from_pretrained(
-            config.model.name_or_path, cache_dir=config.cache_local_dir, low_cpu_mem_usage=True, torch_dtype=model_torch_dtype)
+    # if config.model.config_path:
+    #     with torch.device("meta"):
+    #         ref_model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(model_torch_dtype)
+    # else:
+    #     ref_model = AutoModelForCausalLM.from_pretrained(
+    #         config.model.name_or_path, cache_dir=config.cache_local_dir, low_cpu_mem_usage=True, torch_dtype=model_torch_dtype)
     logger.info("ref_model loaded")
-    ref_model.eval()
-    ref_model = prepare_model(ref_model, config)
+    # ref_model.eval()
+    # ref_model = prepare_model(ref_model, config)
+    ref_model = model
 
     logger.info("ref_model prepared")
     print_param_sharding(ref_model)
