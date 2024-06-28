@@ -464,25 +464,25 @@ def main(config: DictConfig):
     xm.mark_step()
     logger.info(f"cpu memory usage: {get_cpu_memory()}")
 
-    no_decay = ["bias", "layer_norm.weight", "LayerNorm.bias"]
-    optimizer_grouped_parameters = [
-        {
-            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
-            "weight_decay": config.get("weight_decay", 0),
-        },
-        {
-            "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
-            "weight_decay": 0.0,
-        },
-    ]
+    # no_decay = ["bias", "layer_norm.weight", "LayerNorm.bias"]
+    # optimizer_grouped_parameters = [
+    #     {
+    #         "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+    #         "weight_decay": config.get("weight_decay", 0),
+    #     },
+    #     {
+    #         "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
+    #         "weight_decay": 0.0,
+    #     },
+    # ]
 
     if config.optimizer == "ADAMW_TORCH_XLA":
         from torch_xla.amp.syncfree import AdamW
-        optimizer = AdamW(optimizer_grouped_parameters, lr=config.lr)
+        optimizer = AdamW(list(model.parameters()) + list(ref_model.parameters()), lr=config.lr)
     else:
         optimizer = getattr(torch.optim, config.optimizer)(optimizer_grouped_parameters, lr=config.lr)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda step: min(1.0, (step + 1) / (config.warmup_steps + 1)))
-    optimizer = make_optimizer_prime_spmd(optimizer)
+    # optimizer = make_optimizer_prime_spmd(optimizer)
 
     tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
     if tokenizer.pad_token is None:
