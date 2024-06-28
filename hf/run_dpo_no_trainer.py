@@ -431,7 +431,8 @@ def main(config: DictConfig):
         model_config.static = True
         model_config.flash_attention = True
         with torch.device("meta"):
-            model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(model_torch_dtype)
+            model = AutoModelForCausalLM.from_config(model_config)
+        model = model.to_empty(device='cpu').to(model_torch_dtype)
     else:
         model = AutoModelForCausalLM.from_pretrained(
             config.model.name_or_path, cache_dir=config.cache_local_dir, low_cpu_mem_usage=True, torch_dtype=model_torch_dtype)
@@ -448,7 +449,8 @@ def main(config: DictConfig):
     logger.info("loading ref_model")
     if config.model.config_path:
         with torch.device("meta"):
-            ref_model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(model_torch_dtype)
+            ref_model = AutoModelForCausalLM.from_config(model_config)
+        ref_model = ref_model.to_empty(device='cpu').to(model_torch_dtype)
     else:
         ref_model = AutoModelForCausalLM.from_pretrained(
             config.model.name_or_path, cache_dir=config.cache_local_dir, low_cpu_mem_usage=True, torch_dtype=model_torch_dtype)
@@ -480,7 +482,7 @@ def main(config: DictConfig):
         from torch_xla.amp.syncfree import AdamW
         optimizer = AdamW(list(model.parameters()) + list(ref_model.parameters()), lr=config.lr)
     else:
-        optimizer = getattr(torch.optim, config.optimizer)(optimizer_grouped_parameters, lr=config.lr)
+        optimizer = getattr(torch.optim, config.optimizer)(model.parameters(), lr=config.lr)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda step: min(1.0, (step + 1) / (config.warmup_steps + 1)))
     # optimizer = make_optimizer_prime_spmd(optimizer)
 
