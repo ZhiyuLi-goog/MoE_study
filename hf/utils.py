@@ -63,11 +63,11 @@ def get_synthetic_data_device_iterator(config, tokenizer, mesh):
     data["rejected_labels"][:, :config.max_length // 2] = config.label_pad_token_id
     train_loader = xu.SampleGenerator(
         data = data,
-        sample_count=100,
+        sample_count=10000,
     )
     eval_loader = xu.SampleGenerator(
         data = data,
-        sample_count=10,
+        sample_count=10000,
     )
 
     return convert_device_iterator(train_loader, mesh), convert_device_iterator(eval_loader, mesh)
