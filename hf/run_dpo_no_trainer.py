@@ -442,6 +442,8 @@ def main(config: DictConfig):
     logger.info("ref_model loaded")
     ref_model.eval()
     ref_model = prepare_model(ref_model, config)
+    for p in ref_model.parameters():
+        p.requires_grad = False
 
     logger.info("ref_model prepared")
     print_param_sharding(ref_model)
