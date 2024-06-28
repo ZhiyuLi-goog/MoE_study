@@ -482,7 +482,7 @@ def main(config: DictConfig):
     else:
         optimizer = getattr(torch.optim, config.optimizer)(optimizer_grouped_parameters, lr=config.lr)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda step: min(1.0, (step + 1) / (config.warmup_steps + 1)))
-    # optimizer = make_optimizer_prime_spmd(optimizer)
+    optimizer = make_optimizer_prime_spmd(optimizer)
 
     tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
     if tokenizer.pad_token is None:
