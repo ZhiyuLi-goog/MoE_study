@@ -473,6 +473,7 @@ def main(config: DictConfig):
 
     torch.distributed.init_process_group('gloo', init_method='xla://')
     if config.checkpoint_manager_path:
+        logger.info(f"checkpoint found from {config.checkpoint_manager_path=}")
         ckpt_manager = CheckpointManager(
             path=config.checkpoint_manager_path,
             save_interval=float('inf'),
@@ -485,6 +486,7 @@ def main(config: DictConfig):
         ckpt_manager.restore(0, state_dict)
         model.load_state_dict(state_dict['model'])
         logger.info("checkpoint loaded")
+        logger.info(f"{model.state_dict()=}")
 
     start_step = 0
     tracker = xm.RateTracker()
@@ -508,11 +510,6 @@ def main(config: DictConfig):
             xm.wait_device_ops()
             import tempfile
             xp.trace_detached('127.0.0.1:9012', config.get("profile_logdir", tempfile.mkdtemp()), config.get("profile_duration", 20000))
-
-        state_dict = {
-            'model': model.state_dict(),
-        }
-
 
     if config.xla_metric_report:
         logger.info(met.metrics_report())
