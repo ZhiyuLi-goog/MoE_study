@@ -471,19 +471,23 @@ def main(config: DictConfig):
     global_batch_size = config.per_device_train_batch_size * num_devices
     # 'chosen_input_ids', 'chosen_attention_mask', 'rejected_input_ids', 'rejected_attention_mask', 'chosen_labels', 'rejected_labels'
 
-    torch.distributed.init_process_group('gloo', init_method='xla://')
     if config.checkpoint_manager_path:
+        torch.distributed.init_process_group('gloo', init_method='xla://')
         logger.info(f"checkpoint found from {config.checkpoint_manager_path=}")
+
         ckpt_manager = CheckpointManager(
             path=config.checkpoint_manager_path,
             save_interval=float('inf'),
             max_to_keep=0,
         )
 
+        max_step = max(ckpt_manager.all_steps())
+        logger.info(f"Restoring model from {max_step=}")
+
         state_dict = {
             'model': model.state_dict(),
         }
-        ckpt_manager.restore(0, state_dict)
+        ckpt_manager.restore(max_step, state_dict)
         model.load_state_dict(state_dict['model'])
         logger.info("checkpoint loaded")
         logger.info(f"{model.state_dict()=}")
