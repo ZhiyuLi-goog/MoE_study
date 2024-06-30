@@ -35,13 +35,27 @@ def get_cpu_memory() -> str:
   cpu_bytes = Process().memory_info().rss
   return fmt_size(cpu_bytes)
 
-def convert_device_iterator(data_loader, mesh):
-    device_loader = pl.MpDeviceLoader(
-        data_loader,
-        torch_xla.device(),
-        # Shard the input's batch dimension along the `fsdp` axis, no sharding along other dimensions
-        input_sharding=xs.ShardingSpec(mesh, ('fsdp', None)))
-    return iter(device_loader)
+
+class MultiHostDataLoadIterator:
+    """fold get_next_batch_sharded into a iterator class"""
+  
+    def __init__(self, data_loader, mesh):
+      self.device_loader = pl.MpDeviceLoader(
+          data_loader,
+          torch_xla.device(),
+          # Shard the input's batch dimension along the `fsdp` axis, no sharding along other dimensions
+          input_sharding=xs.ShardingSpec(mesh, ('fsdp', None)))
+      self.data_iterator = iter(self.device_loader)
+  
+    def reset(self):
+      self.data_iterator = iter(self.device_loader)
+  
+    def __iter__(self):
+      self.reset()
+      return self
+
+    def __next__(self):
+      return next(self.data_iterator)
 
 
 def get_synthetic_data_device_iterator(config, tokenizer, mesh):
@@ -70,7 +84,7 @@ def get_synthetic_data_device_iterator(config, tokenizer, mesh):
         sample_count=10,
     )
 
-    return convert_device_iterator(train_loader, mesh), convert_device_iterator(eval_loader, mesh)
+    return MultiHostDataLoadIterator(train_loader, mesh), MultiHostDataLoadIterator(eval_loader, mesh)
 
 
 def build_tokenized_answer(tokenizer, prompt, answer):
@@ -289,8 +303,4 @@ def get_data_device_iterator(config, tokenizer, mesh):
     ds = ds.map(partial(pad_sequence, max_length=config.max_length), num_proc=num_proc)
 
     train_loader, eval_loader = DataLoader(ds['train'], shuffle=True, drop_last=True, collate_fn=default_data_collator), DataLoader(ds['test'], collate_fn=default_data_collator)
-    return convert_device_iterator(train_loader, mesh), convert_device_iterator(eval_loader, mesh)
-
-
-
-
+    return MultiHostDataLoadIterator(train_loader, mesh), MultiHostDataLoadIterator(eval_loader, mesh)
