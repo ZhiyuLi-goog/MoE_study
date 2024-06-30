@@ -393,6 +393,35 @@ def clip_gradient(model, config):
     """Clip the gradient norm of the parameters of an FSDP policy, gathering the gradients across all GPUs."""
     return torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
 
+def eval_fn(model, ref_model, eval_device_loader, config, step):
+    total_losses = []
+    total_weights = 0.
+    for eval_batch in eval_device_loader:
+        model.eval()
+        with torch.no_grad():
+            _, metrics = get_batch_loss_metrics(model, ref_model, eval_batch, "eval", beta=config.beta, config=config)
+        total_losses.append(metrics["eval_total_losses"])
+        total_weights += metrics["eval_num_samples"]
+
+    total_losses = sum(total_losses)
+    avg_losses =  total_losses / total_weights
+    xm.add_step_closure(
+        print, args=(f"{step=}, {avg_losses=} {total_losses=}, {total_weights=}", ))
+
+def train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step):
+    batch = next(train_device_loader)
+    optimizer.zero_grad()
+    model.train()
+    loss, metrics = get_batch_loss_metrics(model, ref_model, batch, "train", beta=config.beta, config=config)
+    tracker.add(global_batch_size)
+
+    loss.backward()
+    # grad_norm = clip_gradient(model, config)
+    # metrics['grad_norm'] = grad_norm
+    xm.optimizer_step(optimizer)
+    scheduler.step()
+    return loss, metrics
+
 
 @hydra.main(version_base=None, config_path="config", config_name="config")
 def main(config: DictConfig):
@@ -496,6 +525,7 @@ def main(config: DictConfig):
         ckpt_manager.restore(0, state_dict)
         model.load_state_dict(state_dict['model'])
         ref_model.load_state_dict(state_dict['model'])
+        del state_dict
         xm.mark_step()
         logger.info("checkpoint loaded")
 
@@ -503,18 +533,9 @@ def main(config: DictConfig):
     tracker = xm.RateTracker()
 
     for step in np.arange(start_step, config.max_steps):
-        optimizer.zero_grad()
-        model.train()
-        batch = next(train_device_loader)
-        loss, metrics = get_batch_loss_metrics(model, ref_model, batch, "train", beta=config.beta, config=config)
-        tracker.add(global_batch_size)
-
-        loss.backward()
-        # grad_norm = clip_gradient(model, config)
-        # metrics['grad_norm'] = grad_norm
-        optimizer.step()
-        scheduler.step()
-        
+        loss, metrics = train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step)
+        if step > start_step and step % config.eval_frequency == 0:
+            eval_fn(model, ref_model, eval_device_loader, config, step)
         if step > start_step and step % config.report_metrics_freq == 0:
             xm.add_step_closure(
                 report_metrics, args=(step, loss, tracker, metrics))
@@ -522,20 +543,6 @@ def main(config: DictConfig):
             xm.wait_device_ops()
             import tempfile
             xp.trace_detached('127.0.0.1:9012', config.get("profile_logdir", tempfile.mkdtemp()), config.get("profile_duration", 20000))
-        if step > start_step and config.get('eval_frequency', None) and step % config.eval_frequency == 0:
-            model.eval()
-            total_losses = []
-            total_weights = 0
-            for eval_batch in eval_device_loader:
-                with torch.no_grad():
-                    _, metrics = get_batch_loss_metrics(model, ref_model, eval_batch, "eval", beta=config.beta, config=config)
-                total_losses.append(metrics["eval_total_losses"])
-                total_weights += metrics["eval_num_samples"]
-
-            total_losses = sum(total_losses)
-            avg_losses =  total_losses / total_weights
-            xm.add_step_closure(
-                print, args=(f"{step=}, {avg_losses=} {total_losses=}, {total_weights=}", ))
 
     if config.xla_metric_report:
         logger.info(met.metrics_report())
