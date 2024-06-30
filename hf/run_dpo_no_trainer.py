@@ -402,13 +402,13 @@ def eval_fn(model, ref_model, eval_device_loader, config, step):
     for eval_batch in eval_device_loader:
         model.eval()
         with torch.no_grad():
-            _, metrics = get_batch_loss_metrics(model, ref_model, eval_batch, "eval", beta=config.beta, config=config)
-        total_losses.append(metrics["eval_total_losses"])
-        total_weights += metrics["eval_num_samples"]
+            _, eval_metrics = get_batch_loss_metrics(model, ref_model, eval_batch, "eval", beta=config.beta, config=config)
+        total_losses.append(eval_metrics["eval_total_losses"])
+        total_weights += eval_metrics["eval_num_samples"]
 
     total_losses = sum(total_losses)
     avg_losses =  total_losses / total_weights
-    metric = {"total_losses": total_losses, "total_weights": total_weights}
+    metrics = {"total_losses": total_losses, "total_weights": total_weights}
     xm.add_step_closure(
         report_eval_metrics, args=(step, avg_losses, metrics))
 
