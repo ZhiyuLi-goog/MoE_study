@@ -525,14 +525,15 @@ def main(config: DictConfig):
             model.eval()
             total_loss = 0
             total_weights = 0
-            for eval_step, eval_batch in enumerate(eval_device_loader):
+            for _, eval_batch in enumerate(eval_device_loader):
                 with torch.no_grad():
                     loss, metrics = get_batch_loss_metrics(model, ref_model, eval_batch, "eval", beta=config.beta, config=config)
                 total_loss += loss
                 total_weights += metrics["eval_num_samples"]
-                avg_loss =  total_loss / total_weights
-                xm.add_step_closure(
-                    print, args=(f"{step=} {total_loss=}, {total_loss=} , {total_weights=}", ))
+            
+            avg_loss =  total_loss / total_weights
+            xm.add_step_closure(
+                print, args=(f"{step=}, {avg_loss=} {total_loss=}, {total_weights=}", ))
 
     if config.xla_metric_report:
         logger.info(met.metrics_report())
