@@ -319,6 +319,7 @@ def get_batch_loss_metrics(
     metrics[f"{prefix}logps/chosen"] = policy_chosen_logps.detach().mean()
     metrics[f"{prefix}logits/rejected"] = policy_rejected_logits.detach().mean()
     metrics[f"{prefix}logits/chosen"] = policy_chosen_logits.detach().mean()
+    metrics[f"{prefix}num_samples"] = batch["chosen_input_ids"].shape[0]
 
     return losses.mean(), metrics
 
@@ -519,9 +520,29 @@ def main(config: DictConfig):
             xm.wait_device_ops()
             import tempfile
             xp.trace_detached('127.0.0.1:9012', config.get("profile_logdir", tempfile.mkdtemp()), config.get("profile_duration", 20000))
+        if step > start_step and step % config.eval_frequency == 0:
+            model.eval()
+            for step, batch in enumerate(eval_device_loader):
+                cumulative_eval_metrics = {"total_loss": 0.0, "total_weights": 0.0}
+                with torch.no_grad():
+                    loss, metrics = get_batch_loss_metrics(model, ref_model, batch, "eval", beta=config.beta, config=config)
+                cumulative_eval_metrics["total_loss"] += loss
+                cumulative_eval_metrics["total_weights"] += metrics["eval_num_samples"]
+                avg_loss =  cumulative_eval_metrics["total_loss"] / cumulative_eval_metrics["total_weights"]
+                xm.add_step_closure(
+                    report_metrics, args=(step, avg_loss, tracker, cumulative_eval_metrics))
+
+
+        losses = torch.cat(losses)
+        try:
+            eval_loss = torch.mean(losses)
+            perplexity = math.exp(eval_loss)
+
 
     if config.xla_metric_report:
         logger.info(met.metrics_report())
+    
+
 
 if __name__ == '__main__':
     main()
