@@ -46,7 +46,7 @@ import getpass
 from transformers import set_seed
 from utils import get_synthetic_data_device_iterator, get_data_device_iterator, get_cpu_memory
 import torch_xla.debug.metrics as met
-from torch_xla.experimental.distributed_checkpoint import CheckpointManager
+from torch_xla.experimental.distributed_checkpoint import CheckpointManager, prime_optimizer
 
 OmegaConf.register_new_resolver("get_local_run_dir", lambda exp_name, local_dir: get_local_run_dir(exp_name, local_dir))
 logger = logging.get_logger(__name__)
@@ -455,6 +455,9 @@ def main(config: DictConfig):
         optimizer = AdamW(model.parameters(), lr=config.lr)
     else:
         optimizer = getattr(torch.optim, config.optimizer)(model.parameters(), lr=config.lr)
+
+    # initialize optimizer states
+    optimizer = prime_optimizer(optimizer)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda step: min(1.0, (step + 1) / (config.warmup_steps + 1)))
 
     tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
@@ -494,16 +497,16 @@ def main(config: DictConfig):
     tracker = xm.RateTracker()
 
     for step in np.arange(start_step, config.max_steps):
+        optimizer.zero_grad()
         batch = next(train_device_loader)
         loss, metrics = get_batch_loss_metrics(model, ref_model, batch, "train", beta=config.beta, config=config)
         tracker.add(global_batch_size)
 
         loss.backward()
-        # grad_norm = clip_gradient(model, config)
-        # metrics['grad_norm'] = grad_norm
+        grad_norm = clip_gradient(model, config)
+        metrics['grad_norm'] = grad_norm
         optimizer.step()
         scheduler.step()
-        optimizer.zero_grad()
         
         if step > start_step and step % config.report_metrics_freq == 0:
             xm.add_step_closure(
