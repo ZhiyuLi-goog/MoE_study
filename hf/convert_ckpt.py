@@ -63,7 +63,7 @@ def main(config: DictConfig):
         model_config.flash_attention = True
         with torch.device("meta"):
             model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(model_torch_dtype)
-        model.init_weights()
+        model.apply(model._init_weights)
     else:
         model = AutoModelForCausalLM.from_pretrained(
             config.model.name_or_path, cache_dir=config.cache_local_dir, torch_dtype=model_torch_dtype)

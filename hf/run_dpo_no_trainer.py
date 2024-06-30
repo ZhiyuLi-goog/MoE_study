@@ -481,16 +481,14 @@ def main(config: DictConfig):
             max_to_keep=0,
         )
 
-        max_step = max(ckpt_manager.all_steps())
-        logger.info(f"Restoring model from {max_step=}")
-
         state_dict = {
             'model': model.state_dict(),
         }
-        ckpt_manager.restore(max_step, state_dict)
+        ckpt_manager.restore(0, state_dict)
         model.load_state_dict(state_dict['model'])
+        ref_model.load_state_dict(state_dict['model'])
+        xm.mark_step()
         logger.info("checkpoint loaded")
-        logger.info(f"{model.state_dict()=}")
 
     start_step = 0
     tracker = xm.RateTracker()
