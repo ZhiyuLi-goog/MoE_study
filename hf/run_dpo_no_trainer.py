@@ -150,6 +150,9 @@ def sequence_mask(lengths, maxlen=None, dtype=torch.bool):
 def report_metrics(step, loss, tracker, metrics):
     logger.info(f'{step=}, {loss=}, {tracker.rate()=}, {metrics=}')
 
+def report_eval_metrics(step, loss, metrics):
+    logger.info(f'{step=}, {loss=}, {metrics=}')
+
 def get_batch_logps(
         logits: torch.FloatTensor,
         labels: torch.LongTensor,
@@ -405,8 +408,9 @@ def eval_fn(model, ref_model, eval_device_loader, config, step):
 
     total_losses = sum(total_losses)
     avg_losses =  total_losses / total_weights
+    metric = {"total_losses": total_losses, "total_weights": total_weights}
     xm.add_step_closure(
-        print, args=(f"{step=}, {avg_losses=} {total_losses=}, {total_weights=}", ))
+        report_eval_metrics, args=(step, avg_losses, metrics))
 
 def train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step):
     batch = next(train_device_loader)
