@@ -406,7 +406,7 @@ def eval_fn(model, ref_model, eval_device_loader, config, step):
     total_losses = sum(total_losses)
     avg_losses =  total_losses / total_weights
     xm.add_step_closure(
-        print, args=(f"{step=}, {avg_losses=} {total_losses=}, {total_weights=}", ))
+        logger.info, args=(f"{step=} finished: {avg_losses=} {total_losses=}, {total_weights=}", ))
 
 def train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step):
     batch = next(train_device_loader)
@@ -538,7 +538,7 @@ def main(config: DictConfig):
             eval_fn(model, ref_model, eval_device_loader, config, step)
         if step > start_step and step % config.report_metrics_freq == 0:
             xm.add_step_closure(
-                report_metrics, args=(step, loss, tracker, metrics))
+                logger.info, f'{step=} finished: {loss=}, {tracker.rate()=}, {metrics=}')
         if step == config.get("profile_step", None):
             xm.wait_device_ops()
             import tempfile
