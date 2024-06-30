@@ -532,7 +532,7 @@ def main(config: DictConfig):
                 total_weights += metrics["eval_num_samples"]
                 avg_loss =  total_loss / total_weights
                 xm.add_step_closure(
-                    print, args=(f"{step=} {total_loss=}, {total_loss=} , {total_weights=}"))
+                    print, args=(f"{step=} {total_loss=}, {total_loss=} , {total_weights=}", ))
 
     if config.xla_metric_report:
         logger.info(met.metrics_report())
