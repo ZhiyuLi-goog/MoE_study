@@ -522,16 +522,17 @@ def main(config: DictConfig):
             xm.wait_device_ops()
             import tempfile
             xp.trace_detached('127.0.0.1:9012', config.get("profile_logdir", tempfile.mkdtemp()), config.get("profile_duration", 20000))
-        if step > start_step and step % config.eval_frequency == 0:
+        if step > start_step and config.get('eval_frequency', None) and step % config.eval_frequency == 0:
             model.eval()
-            total_losses = 0
+            total_losses = []
             total_weights = 0
-            for _, eval_batch in enumerate(eval_device_loader):
+            for eval_batch in eval_device_loader:
                 with torch.no_grad():
                     _, metrics = get_batch_loss_metrics(model, ref_model, eval_batch, "eval", beta=config.beta, config=config)
-                total_losses += metrics["eval_total_losses"]
+                total_losses.append(metrics["eval_total_losses"])
                 total_weights += metrics["eval_num_samples"]
-            
+
+            total_losses = sum(total_losses)
             avg_losses =  total_losses / total_weights
             xm.add_step_closure(
                 print, args=(f"{step=}, {avg_losses=} {total_losses=}, {total_weights=}", ))
