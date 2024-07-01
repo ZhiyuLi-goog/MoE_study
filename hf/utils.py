@@ -115,7 +115,7 @@ class DPODataCollatorWithPadding:
 
                 # Convert to tensor and pad
                 if self.max_length > 0:
-                    padded_batch[k] = [pad_to_length(ex[k], self.max_length, padding_value) for ex in features]
+                    padded_batch[k] = torch.stack([pad_to_length(ex, self.max_length, padding_value) for ex in to_pad], dim=0)
                 else:
                     padded_batch[k] = pad_sequence(to_pad, batch_first=True, padding_value=padding_value)
             else:
@@ -330,7 +330,7 @@ def tokenize_row(feature, tokenizer=None, truncation_mode="keep_start", max_leng
 
     return batch
 
-def get_data_device_iterator(config, tokenizer, mesh):
+def get_data_device_iterator(config, tokenizer, mesh, load_from_cache_file=True):
 
     ds = load_dataset(config.datasets)
     num_proc = config.num_proc
@@ -346,11 +346,11 @@ def get_data_device_iterator(config, tokenizer, mesh):
     ds = ds.map(
         process,
         num_proc=num_proc,
-        load_from_cache_file=False,
+        load_from_cache_file=load_from_cache_file,
         desc="apply_chat_template",
     )
 
-    ds = ds.map(partial(tokenize_row, tokenizer=tokenizer, max_prompt_length=config.max_prompt_length, max_length=config.max_length), num_proc=num_proc, load_from_cache_file=False, desc="tokenize_row")
+    ds = ds.map(partial(tokenize_row, tokenizer=tokenizer, max_prompt_length=config.max_prompt_length, max_length=config.max_length), num_proc=num_proc, load_from_cache_file=load_from_cache_file, desc="tokenize_row")
 
     ds = ds.select_columns(
         ['chosen_input_ids', 'chosen_attention_mask', 'chosen_labels', 'rejected_input_ids', 'rejected_attention_mask', 'rejected_labels']
@@ -369,7 +369,7 @@ def get_data_device_iterator(config, tokenizer, mesh):
     #         row[k] += [padding_value] * (max_length - len(row[k]))
     #     return row
     
-    # ds = ds.map(partial(pad_sequence, max_length=config.max_length), num_proc=num_proc, load_from_cache_file=False, desc="pad_sequence")
+    # ds = ds.map(partial(pad_sequence, max_length=config.max_length), num_proc=num_proc, load_from_cache_file=load_from_cache_file, desc="pad_sequence")
 
     data_collator = DPODataCollatorWithPadding(max_length=config.max_length)
 
