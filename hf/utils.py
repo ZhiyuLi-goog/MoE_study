@@ -74,7 +74,6 @@ def pad_to_length(tensor: torch.Tensor, length: int, pad_value: Union[int, float
             dim=dim,
         )
 
-
 @dataclass
 class DPODataCollatorWithPadding:
     r"""
@@ -113,8 +112,10 @@ class DPODataCollatorWithPadding:
                     padding_value = self.label_pad_token_id
                 else:
                     raise ValueError(f"Unexpected key in batch '{k}'")
+
+                # Convert to tensor and pad
                 if self.max_length > 0:
-                    padded_batch[k] = pad_to_length(to_pad, self.max_length, padding_value)
+                    padded_batch[k] = [pad_to_length(ex[k], self.max_length, padding_value) for ex in features]
                 else:
                     padded_batch[k] = pad_sequence(to_pad, batch_first=True, padding_value=padding_value)
             else:
