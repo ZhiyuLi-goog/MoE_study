@@ -269,6 +269,9 @@ def get_data_device_iterator(config, tokenizer, mesh):
 
     ds = load_dataset(config.datasets)
     num_proc = config.num_proc
+    if num_proc > 1:
+        raise ValueError(f"{config.num_proc=}, which is bigger than 1. HuggingFace treats SPMD as a single-device program.")
+
     def process(row):
         row["chosen"] = tokenizer.apply_chat_template(row["chosen"], tokenize=False)
         row["rejected"] = tokenizer.apply_chat_template(row["rejected"], tokenize=False)
@@ -281,7 +284,7 @@ def get_data_device_iterator(config, tokenizer, mesh):
         load_from_cache_file=False,
     )
 
-    ds = ds.map(partial(tokenize_row, tokenizer=tokenizer, max_prompt_length=config.max_prompt_length, max_length=config.max_length), num_proc=num_proc)
+    ds = ds.map(partial(tokenize_row, tokenizer=tokenizer, max_prompt_length=config.max_prompt_length, max_length=config.max_length), num_proc=num_proc, load_from_cache_file=False)
 
     ds = ds.select_columns(
         ['chosen_input_ids', 'chosen_attention_mask', 'chosen_labels', 'rejected_input_ids', 'rejected_attention_mask', 'rejected_labels']
@@ -300,7 +303,7 @@ def get_data_device_iterator(config, tokenizer, mesh):
             row[k] += [padding_value] * (max_length - len(row[k]))
         return row
     
-    ds = ds.map(partial(pad_sequence, max_length=config.max_length), num_proc=num_proc)
+    ds = ds.map(partial(pad_sequence, max_length=config.max_length), num_proc=num_proc, load_from_cache_file=False)
 
     train_loader, eval_loader = DataLoader(ds['train'], shuffle=True, drop_last=True, collate_fn=default_data_collator), DataLoader(ds['test'], collate_fn=default_data_collator)
     return MultiHostDataLoadIterator(train_loader, mesh), MultiHostDataLoadIterator(eval_loader, mesh)
