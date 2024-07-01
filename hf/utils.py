@@ -282,9 +282,10 @@ def get_data_device_iterator(config, tokenizer, mesh):
         process,
         num_proc=num_proc,
         load_from_cache_file=False,
+        desc="apply_chat_template",
     )
 
-    ds = ds.map(partial(tokenize_row, tokenizer=tokenizer, max_prompt_length=config.max_prompt_length, max_length=config.max_length), num_proc=num_proc, load_from_cache_file=False)
+    ds = ds.map(partial(tokenize_row, tokenizer=tokenizer, max_prompt_length=config.max_prompt_length, max_length=config.max_length), num_proc=num_proc, load_from_cache_file=False, desc="tokenize_row")
 
     ds = ds.select_columns(
         ['chosen_input_ids', 'chosen_attention_mask', 'chosen_labels', 'rejected_input_ids', 'rejected_attention_mask', 'rejected_labels']
@@ -303,7 +304,7 @@ def get_data_device_iterator(config, tokenizer, mesh):
             row[k] += [padding_value] * (max_length - len(row[k]))
         return row
     
-    ds = ds.map(partial(pad_sequence, max_length=config.max_length), num_proc=num_proc, load_from_cache_file=False)
+    ds = ds.map(partial(pad_sequence, max_length=config.max_length), num_proc=num_proc, load_from_cache_file=False, desc="pad_sequence")
 
     train_loader, eval_loader = DataLoader(ds['train'], shuffle=True, drop_last=True, collate_fn=default_data_collator), DataLoader(ds['test'], collate_fn=default_data_collator)
     return MultiHostDataLoadIterator(train_loader, mesh), MultiHostDataLoadIterator(eval_loader, mesh)
