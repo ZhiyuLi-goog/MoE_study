@@ -20,6 +20,8 @@ import torch_xla.distributed.parallel_loader as pl
 from torch.utils.data import DataLoader
 from transformers import default_data_collator
 import torch
+from dataclasses import dataclass
+from torch.nn.utils.rnn import pad_sequence
 
 def fmt_size(num_bytes: int) -> str:
   assert num_bytes > 0
@@ -57,6 +59,68 @@ class MultiHostDataLoadIterator:
     def __next__(self):
       return next(self.data_iterator)
 
+
+def pad_to_length(tensor: torch.Tensor, length: int, pad_value: Union[int, float], dim: int = -1) -> torch.Tensor:
+    if tensor.size(dim) >= length:
+        return tensor
+    else:
+        pad_size = list(tensor.shape)
+        pad_size[dim] = length - tensor.size(dim)
+        return torch.cat(
+            [
+                tensor,
+                pad_value * torch.ones(*pad_size, dtype=tensor.dtype, device=tensor.device),
+            ],
+            dim=dim,
+        )
+
+
+@dataclass
+class DPODataCollatorWithPadding:
+    r"""
+    DPO DataCollator class that pads the tokenized inputs to the maximum length of the batch.
+    Args:
+        pad_token_id (`int` defaults to 0):
+            The tokenizer's pad_token_id.
+        label_pad_token_id (`int`, defaults to -100):
+            The label used for masking.
+        is_encoder_decoder (`Optional[bool]`, `optional`, defaults to `None`):
+            Whether or not you model has an encoder_decoder architecture.
+    """
+
+    pad_token_id: int = 0
+    label_pad_token_id: int = -100
+    max_length: int = -1
+
+    def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]:
+        # first, pad everything to the same length
+        padded_batch = {}
+        for k in features[0].keys():
+            if k.endswith(("_input_ids", "_attention_mask", "_labels", "_pixel_values")):
+                to_pad = [torch.LongTensor(ex[k]) for ex in features]
+
+                if (k.startswith("prompt")) and (k.endswith("input_ids")):
+                    if self.pad_token_id is None:
+                        raise ValueError(
+                            "Padding is enabled, but the tokenizer is not configured with a padding token."
+                            " Explicitly set `tokenizer.pad_token` (e.g. `tokenizer.pad_token = tokenizer.eos_token`)"
+                            " before calling the trainer."
+                        )
+                    padding_value = self.pad_token_id
+                elif k.endswith("_attention_mask"):
+                    padding_value = 0
+                elif k.startswith(("chosen", "rejected", "completion")) or ("decoder" in k):
+                    padding_value = self.label_pad_token_id
+                else:
+                    raise ValueError(f"Unexpected key in batch '{k}'")
+                if self.max_length > 0:
+                    padded_batch[k] = pad_to_length(to_pad, self.max_length, padding_value)
+                else:
+                    padded_batch[k] = pad_sequence(to_pad, batch_first=True, padding_value=padding_value)
+            else:
+                padded_batch[k] = [ex[k] for ex in features]
+
+        return padded_batch
 
 def get_synthetic_data_device_iterator(config, tokenizer, mesh):
     # Shard the input(data parallel).
@@ -291,20 +355,23 @@ def get_data_device_iterator(config, tokenizer, mesh):
         ['chosen_input_ids', 'chosen_attention_mask', 'chosen_labels', 'rejected_input_ids', 'rejected_attention_mask', 'rejected_labels']
     )
 
-    def pad_sequence(row, max_length: int = None, pad_token_id: int = 0, label_pad_token_id: int = -100):
-        if not max_length:
-            max_length = max([len(v) for _, v in row.items()])
-        for k in row.keys():
-            if k.endswith("input_ids"):
-                padding_value = pad_token_id
-            elif k.endswith("_attention_mask"):
-                padding_value = 0
-            elif k.startswith(("chosen", "rejected")):
-                padding_value = label_pad_token_id
-            row[k] += [padding_value] * (max_length - len(row[k]))
-        return row
+    # def pad_sequence(row, max_length: int = None, pad_token_id: int = 0, label_pad_token_id: int = -100):
+    #     if not max_length:
+    #         max_length = max([len(v) for _, v in row.items()])
+    #     for k in row.keys():
+    #         if k.endswith("input_ids"):
+    #             padding_value = pad_token_id
+    #         elif k.endswith("_attention_mask"):
+    #             padding_value = 0
+    #         elif k.startswith(("chosen", "rejected")):
+    #             padding_value = label_pad_token_id
+    #         row[k] += [padding_value] * (max_length - len(row[k]))
+    #     return row
     
-    ds = ds.map(partial(pad_sequence, max_length=config.max_length), num_proc=num_proc, load_from_cache_file=False, desc="pad_sequence")
+    # ds = ds.map(partial(pad_sequence, max_length=config.max_length), num_proc=num_proc, load_from_cache_file=False, desc="pad_sequence")
 
-    train_loader, eval_loader = DataLoader(ds['train'], shuffle=True, drop_last=True, collate_fn=default_data_collator), DataLoader(ds['test'], collate_fn=default_data_collator)
+    data_collator = DPODataCollatorWithPadding(max_length=config.max_length)
+
+    train_loader, eval_loader = DataLoader(ds['train'], shuffle=True, drop_last=True, collate_fn=data_collator), DataLoader(ds['test'], collate_fn=data_collator)
     return MultiHostDataLoadIterator(train_loader, mesh), MultiHostDataLoadIterator(eval_loader, mesh)
+
