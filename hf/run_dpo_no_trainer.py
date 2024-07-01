@@ -420,6 +420,7 @@ def train_step(model, ref_model, train_device_loader, config, step, tracker, opt
     tracker.add(global_batch_size)
 
     loss.backward()
+    clip_gradient(model, config)
     # grad_norm = clip_gradient(model, config)
     # metrics['grad_norm'] = grad_norm
     xm.optimizer_step(optimizer)
