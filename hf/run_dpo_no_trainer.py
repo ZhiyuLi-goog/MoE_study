@@ -423,8 +423,7 @@ def train_step(model, ref_model, train_device_loader, config, step, tracker, opt
     clip_gradient(model, config)
     # grad_norm = clip_gradient(model, config)
     # metrics['grad_norm'] = grad_norm
-    # xm.optimizer_step(optimizer)
-    optimizer.step()
+    xm.optimizer_step(optimizer)
     scheduler.step()
     return loss, metrics
 
