@@ -284,7 +284,6 @@ def get_batch_loss_metrics(
                 _,
                 _,
             ) = forward(ref_model, batch, label_pad_token_id)
-    xm.mark_step()
 
 
     if config.concatenated_forward:
@@ -500,6 +499,11 @@ def main(config: DictConfig):
 
     # initialize optimizer states
     optimizer = prime_optimizer(optimizer)
+    xm.mark_step()
+
+    clip_gradient(model, config)
+    xm.mark_step()
+
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda step: min(1.0, (step + 1) / (config.warmup_steps + 1)))
 
     tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
