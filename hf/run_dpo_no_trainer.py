@@ -267,23 +267,6 @@ def get_batch_loss_metrics(
     """Compute the DPO loss and other metrics for the given batch of inputs for train or test."""
     metrics = {}
 
-    if config.concatenated_forward:
-        (
-            policy_chosen_logps,
-            policy_rejected_logps,
-            policy_chosen_logits,
-            policy_rejected_logits,
-            policy_chosen_logps_avg,
-        ) = concatenated_forward(model, batch, label_pad_token_id)
-    else:
-        (
-            policy_chosen_logps,
-            policy_rejected_logps,
-            policy_chosen_logits,
-            policy_rejected_logits,
-            policy_chosen_logps_avg,
-        ) = forward(model, batch, label_pad_token_id)
-
     with torch.no_grad():
         if config.concatenated_forward:
             (
@@ -301,6 +284,25 @@ def get_batch_loss_metrics(
                 _,
                 _,
             ) = forward(ref_model, batch, label_pad_token_id)
+    xm.mark_step()
+
+
+    if config.concatenated_forward:
+        (
+            policy_chosen_logps,
+            policy_rejected_logps,
+            policy_chosen_logits,
+            policy_rejected_logits,
+            policy_chosen_logps_avg,
+        ) = concatenated_forward(model, batch, label_pad_token_id)
+    else:
+        (
+            policy_chosen_logps,
+            policy_rejected_logps,
+            policy_chosen_logits,
+            policy_rejected_logits,
+            policy_chosen_logps_avg,
+        ) = forward(model, batch, label_pad_token_id)
 
     losses, chosen_rewards, rejected_rewards = dpo_loss(
         policy_chosen_logps,
