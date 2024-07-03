@@ -58,6 +58,7 @@ import torch_xla.distributed.spmd as xs
 import torch_xla.runtime as xr
 
 import torch_xla.debug.profiler as xp
+torch_xla.experimental.eager_mode(True)
 server = xp.start_server(9012)
 print(f'Profiling server started: {str(server)}')
 
@@ -257,7 +258,8 @@ def concatenated_forward(
 
 def get_batch_loss_metrics(
         model,
-        ref_model,
+        reference_chosen_logps,
+        reference_rejected_logps,
         batch: Dict[str, Union[List, torch.LongTensor]],
         train_eval: Literal["train", "eval"] = "train",
         label_pad_token_id: int = -100,
@@ -266,25 +268,6 @@ def get_batch_loss_metrics(
     ):
     """Compute the DPO loss and other metrics for the given batch of inputs for train or test."""
     metrics = {}
-
-    with torch.no_grad():
-        if config.concatenated_forward:
-            (
-                reference_chosen_logps,
-                reference_rejected_logps,
-                _,
-                _,
-                _,
-            ) = concatenated_forward(ref_model, batch, label_pad_token_id)
-        else:
-            (
-                reference_chosen_logps,
-                reference_rejected_logps,
-                _,
-                _,
-                _,
-            ) = forward(ref_model, batch, label_pad_token_id)
-
 
     if config.concatenated_forward:
         (
@@ -397,36 +380,7 @@ def clip_gradient(model, config):
     """Clip the gradient norm of the parameters of an FSDP policy, gathering the gradients across all GPUs."""
     return torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
 
-def eval_fn(model, ref_model, eval_device_loader, config, step):
-    total_losses = []
-    total_weights = 0.
-    for eval_batch in eval_device_loader:
-        model.eval()
-        with torch.no_grad():
-            _, eval_metrics = get_batch_loss_metrics(model, ref_model, eval_batch, "eval", beta=config.beta, config=config)
-        total_losses.append(eval_metrics["eval_total_losses"])
-        total_weights += eval_metrics["eval_num_samples"]
 
-    total_losses = sum(total_losses)
-    avg_losses =  total_losses / total_weights
-    metrics = {"total_losses": total_losses, "total_weights": total_weights}
-    xm.add_step_closure(
-        report_eval_metrics, args=(step, avg_losses, metrics))
-
-def train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step):
-    batch = next(train_device_loader)
-    optimizer.zero_grad()
-    model.train()
-    loss, metrics = get_batch_loss_metrics(model, ref_model, batch, "train", beta=config.beta, config=config)
-    tracker.add(global_batch_size)
-
-    loss.backward()
-    clip_gradient(model, config)
-    # grad_norm = clip_gradient(model, config)
-    # metrics['grad_norm'] = grad_norm
-    xm.optimizer_step(optimizer)
-    scheduler.step()
-    return loss, metrics
 
 
 @hydra.main(version_base=None, config_path="config", config_name="config")
@@ -543,8 +497,78 @@ def main(config: DictConfig):
     start_step = 0
     tracker = xm.RateTracker()
 
+    def concatenated_forward_no_grad(
+            model: nn.Module, batch: Dict[str, Union[List, torch.LongTensor]], label_pad_token_id: int = -100,
+        ) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+        """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
+
+        We do this to avoid doing two forward passes, because it's faster for FSDP.
+        """
+        with torch.no_grad():
+            concatenated_batch = create_concatenated_batch(batch)
+            len_chosen = concatenated_batch["concatenated_input_ids"].shape[0] // 2
+            all_logits = model(
+                concatenated_batch["concatenated_input_ids"],
+                attention_mask=concatenated_batch["concatenated_attention_mask"],
+                use_cache=False,
+            ).logits
+
+            all_logps, size_completion = get_batch_logps(
+                all_logits,
+                concatenated_batch["concatenated_labels"],
+                label_pad_token_id=label_pad_token_id,
+            )
+
+            labels = concatenated_batch["concatenated_labels"].clone()
+
+            chosen_logps = all_logps[:len_chosen]
+            rejected_logps = all_logps[len_chosen:]
+
+            return (chosen_logps, rejected_logps)
+
+    concatenated_forward_no_grad_compiled = torch_xla.experimental.compile(concatenated_forward_no_grad)
+    def train_step(model, reference_chosen_logps, reference_rejected_logps, batch, config, step, tracker, optimizer, global_batch_size, scheduler, start_step):
+        optimizer.zero_grad()
+        model.train()
+        loss, metrics = get_batch_loss_metrics(model, reference_chosen_logps, reference_rejected_logps, batch, "train", beta=config.beta, config=config)
+        tracker.add(global_batch_size)
+
+        loss.backward()
+        clip_gradient(model, config)
+        # grad_norm = clip_gradient(model, config)
+        # metrics['grad_norm'] = grad_norm
+        xm.optimizer_step(optimizer)
+        scheduler.step()
+        return loss, metrics
+    print(f"{train_step=}")
+    train_step = torch_xla.experimental.compile(train_step)
+
+    def eval_step(model, reference_chosen_logps, reference_rejected_logps, batch, config, step):
+        model.eval()
+        with torch.no_grad():
+            _, eval_metrics = get_batch_loss_metrics(model, reference_chosen_logps, reference_rejected_logps, eval_batch, "eval", beta=config.beta, config=config)
+        return eval_metrics
+    eval_step = torch_xla.experimental.compile(eval_step)
+
+    def eval_fn(model, ref_model, eval_batch, config, step):
+        total_losses = []
+        total_weights = 0.
+        for eval_batch in eval_device_loader:
+            reference_chosen_logps, reference_rejected_logps = concatenated_forward_no_grad_compiled(ref_model, batch)
+            eval_metrics = eval_step(model, reference_chosen_logps, reference_rejected_logps, batch, config, step)
+            total_losses.append(eval_metrics["eval_total_losses"])
+            total_weights += eval_metrics["eval_num_samples"]
+
+        total_losses = sum(total_losses)
+        avg_losses =  total_losses / total_weights
+        metrics = {"total_losses": total_losses, "total_weights": total_weights}
+        xm.add_step_closure(
+            report_eval_metrics, args=(step, avg_losses, metrics))
+
     for step in np.arange(start_step, config.max_steps):
-        loss, metrics = train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step)
+        batch = next(train_device_loader)
+        reference_chosen_logps, reference_rejected_logps = concatenated_forward_no_grad_compiled(ref_model, batch)
+        loss, metrics = train_step(model, reference_chosen_logps, reference_rejected_logps, batch, config, step, tracker, optimizer, global_batch_size, scheduler, start_step)
         if step > start_step and step % config.eval_frequency == 0:
             eval_fn(model, ref_model, eval_device_loader, config, step)
         if step > start_step and step % config.report_metrics_freq == 0:
