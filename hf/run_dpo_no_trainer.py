@@ -527,8 +527,12 @@ def main(config: DictConfig):
             'model': model.state_dict(),
         }
         ckpt_manager.restore(0, state_dict)
+        for k, v in state_dict['model'].items():
+            logger.info(f"{k}: {v.dtype}")
         model.load_state_dict(state_dict['model'])
+        model = model.to(model_torch_dtype)
         ref_model.load_state_dict(state_dict['model'])
+        ref_model = ref_model.to(model_torch_dtype)
         del state_dict
         xm.mark_step()
         logger.info("checkpoint loaded")
