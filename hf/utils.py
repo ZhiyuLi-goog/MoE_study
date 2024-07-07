@@ -138,8 +138,8 @@ def get_synthetic_data_device_iterator(config, tokenizer, mesh):
     }
     data["chosen_labels"] = data["chosen_input_ids"]
     data["rejected_labels"] = data["rejected_input_ids"]
-    data["chosen_labels"][:, :config.max_length // 2] = config.label_pad_token_id
-    data["rejected_labels"][:, :config.max_length // 2] = config.label_pad_token_id
+    # data["chosen_labels"][:, :config.max_length // 2] = config.label_pad_token_id
+    # data["rejected_labels"][:, :config.max_length // 2] = config.label_pad_token_id
     train_loader = xu.SampleGenerator(
         data = data,
         sample_count=100,
