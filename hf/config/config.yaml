@@ -21,7 +21,7 @@ max_grad_norm: 1.0
 torch_dtype: bfloat16
 max_steps: 10
 use_synthetic_data: true
-report_metrics_freq: 1
+report_metrics_freq: 3
 
 use_cache: true
 cache_local_dir: null
