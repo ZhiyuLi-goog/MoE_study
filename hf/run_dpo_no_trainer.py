@@ -58,7 +58,6 @@ import torch_xla.distributed.spmd as xs
 import torch_xla.runtime as xr
 
 import torch_xla.debug.profiler as xp
-torch_xla.experimental.eager_mode(True)
 server = xp.start_server(9012)
 print(f'Profiling server started: {str(server)}')
 
@@ -526,6 +525,7 @@ def main(config: DictConfig):
 
             return (chosen_logps, rejected_logps)
 
+    torch_xla.experimental.eager_mode(True)
     concatenated_forward_no_grad_compiled = torch_xla.experimental.compile(concatenated_forward_no_grad)
     def train_step(model, reference_chosen_logps, reference_rejected_logps, batch, config, step, tracker, optimizer, global_batch_size, scheduler, start_step):
         optimizer.zero_grad()
@@ -565,6 +565,8 @@ def main(config: DictConfig):
         xm.add_step_closure(
             report_eval_metrics, args=(step, avg_losses, metrics))
 
+    print_param_sharding(model)
+    print_param_sharding(ref_model)
     for step in np.arange(start_step, config.max_steps):
         batch = next(train_device_loader)
         reference_chosen_logps, reference_rejected_logps = concatenated_forward_no_grad_compiled(ref_model, batch)
