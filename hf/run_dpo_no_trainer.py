@@ -546,7 +546,7 @@ def main(config: DictConfig):
     def eval_step(model, reference_chosen_logps, reference_rejected_logps, batch, config, step):
         model.eval()
         with torch.no_grad():
-            _, eval_metrics = get_batch_loss_metrics(model, reference_chosen_logps, reference_rejected_logps, eval_batch, "eval", beta=config.beta, config=config)
+            _, eval_metrics = get_batch_loss_metrics(model, reference_chosen_logps, reference_rejected_logps, batch, "eval", beta=config.beta, config=config)
         return eval_metrics
     eval_step = torch_xla.experimental.compile(eval_step)
 
