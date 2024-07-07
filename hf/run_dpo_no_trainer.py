@@ -445,6 +445,12 @@ def main(config: DictConfig):
     mesh = xs.Mesh(device_ids, mesh_shape, axis_names=("fsdp", "tensor") )
     xs.set_global_mesh(mesh)
 
+    tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    if tokenizer.chat_template is None:
+        tokenizer.chat_template = "{% for message in messages %}{{message['role'] + ': ' + message['content'] + '\n\n'}}{% endfor %}{{ eos_token }}"
+
     model_torch_dtype = getattr(torch, config.model.torch_dtype)
 
     logger.info(f"cpu memory usage: {get_cpu_memory()}")
@@ -498,12 +504,6 @@ def main(config: DictConfig):
     # initialize optimizer states
     optimizer = prime_optimizer(optimizer)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda step: min(1.0, (step + 1) / (config.warmup_steps + 1)))
-
-    tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    if tokenizer.chat_template is None:
-        tokenizer.chat_template = "{% for message in messages %}{{message['role'] + ': ' + message['content'] + '\n\n'}}{% endfor %}{{ eos_token }}"
 
     if config.use_synthetic_data:
         train_device_loader, eval_device_loader = get_synthetic_data_device_iterator(config, tokenizer, mesh)
