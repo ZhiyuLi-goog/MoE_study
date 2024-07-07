@@ -535,8 +535,8 @@ def main(config: DictConfig):
 
         loss.backward()
         clip_gradient(model, config)
-        # grad_norm = clip_gradient(model, config)
-        # metrics['grad_norm'] = grad_norm
+        grad_norm = clip_gradient(model, config)
+        metrics['grad_norm'] = grad_norm
         xm.optimizer_step(optimizer)
         scheduler.step()
         return loss, metrics
