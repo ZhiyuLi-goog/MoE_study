@@ -86,6 +86,8 @@ def main(config: DictConfig):
         state_dict = {
             'model': model.state_dict(),
         }
+        for k, v in state_dict['model'].items():
+            logger.info(f"{k}: {v.dtype} {v.mean()}")
 
         ckpt_manager.save(0, state_dict)
     else:
