@@ -460,9 +460,7 @@ def main(config: DictConfig):
         model_config.static = True
         model_config.flash_attention = True
         with torch.device("meta"):
-            model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device())
-        model.apply(model._init_weights)
-        model = model.to(model_torch_dtype)
+            model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(model_torch_dtype)
     else:
         model = AutoModelForCausalLM.from_pretrained(
             config.model.name_or_path, cache_dir=config.cache_local_dir, low_cpu_mem_usage=True, torch_dtype=model_torch_dtype)
@@ -470,7 +468,6 @@ def main(config: DictConfig):
     logger.info("model loaded")
     model = prepare_model(model, config)
     logger.info("model prepared")
-    print_param_sharding(model)
 
     gc.collect()
     xm.mark_step()
@@ -479,9 +476,7 @@ def main(config: DictConfig):
     logger.info("loading ref_model")
     if config.model.config_path:
         with torch.device("meta"):
-            ref_model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device())
-        ref_model.apply(ref_model._init_weights)
-        ref_model = ref_model.to(model_torch_dtype)
+            ref_model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(model_torch_dtype)
     else:
         ref_model = AutoModelForCausalLM.from_pretrained(
             config.model.name_or_path, cache_dir=config.cache_local_dir, low_cpu_mem_usage=True, torch_dtype=model_torch_dtype)
@@ -490,7 +485,6 @@ def main(config: DictConfig):
     ref_model = prepare_model(ref_model, config)
 
     logger.info("ref_model prepared")
-    print_param_sharding(ref_model)
     gc.collect()
     xm.mark_step()
     logger.info(f"cpu memory usage: {get_cpu_memory()}")
@@ -534,10 +528,16 @@ def main(config: DictConfig):
         del state_dict
         xm.mark_step()
         logger.info("checkpoint loaded")
+    else:
+        model.apply(model._init_weights)
+        ref_model.apply(ref_model._init_weights)
 
+    print_param_sharding(model)
+    print_param_sharding(ref_model)
     start_step = 0
     tracker = xm.RateTracker()
 
+    logger.info(f"cpu memory usage: {get_cpu_memory()}")
     for step in np.arange(start_step, config.max_steps):
         loss, metrics = train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step)
         if step > start_step and step % config.eval_frequency == 0:
