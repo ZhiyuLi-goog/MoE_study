@@ -488,17 +488,6 @@ def main(config: DictConfig):
     gc.collect()
     xm.mark_step()
     logger.info(f"cpu memory usage: {get_cpu_memory()}")
-
-    if config.optimizer == "ADAMW_TORCH_XLA":
-        from torch_xla.amp.syncfree import AdamW
-        optimizer = AdamW(model.parameters(), lr=config.lr)
-    else:
-        optimizer = getattr(torch.optim, config.optimizer)(model.parameters(), lr=config.lr)
-
-    # initialize optimizer states
-    optimizer = prime_optimizer(optimizer)
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda step: min(1.0, (step + 1) / (config.warmup_steps + 1)))
-
     if config.use_synthetic_data:
         train_device_loader, eval_device_loader = get_synthetic_data_device_iterator(config, tokenizer, mesh)
     else:
@@ -531,6 +520,16 @@ def main(config: DictConfig):
     else:
         model.apply(model._init_weights)
         ref_model.apply(ref_model._init_weights)
+
+    if config.optimizer == "ADAMW_TORCH_XLA":
+        from torch_xla.amp.syncfree import AdamW
+        optimizer = AdamW(model.parameters(), lr=config.lr)
+    else:
+        optimizer = getattr(torch.optim, config.optimizer)(model.parameters(), lr=config.lr)
+
+    # initialize optimizer states
+    optimizer = prime_optimizer(optimizer)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda step: min(1.0, (step + 1) / (config.warmup_steps + 1)))
 
     print_param_sharding(model)
     print_param_sharding(ref_model)
