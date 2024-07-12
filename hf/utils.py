@@ -375,6 +375,6 @@ def get_data_device_iterator(config, tokenizer, mesh, load_from_cache_file=True)
 
     num_devices = xr.global_runtime_device_count()
     global_batch_size = int(config.per_device_train_batch_size * num_devices)
-    train_loader, eval_loader = DataLoader(ds['train'], batch_size=global_batch_size, shuffle=True, drop_last=True, collate_fn=data_collator), DataLoader(ds['test'], batch_size=global_batch_size, collate_fn=data_collator)
+    train_loader, eval_loader = DataLoader(ds['train'], batch_size=global_batch_size, shuffle=True, drop_last=True, collate_fn=data_collator), DataLoader(ds['test'], batch_size=global_batch_size, collate_fn=data_collator, drop_last=True)
     return MultiHostDataLoadIterator(train_loader, mesh), MultiHostDataLoadIterator(eval_loader, mesh)
 
