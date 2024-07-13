@@ -406,11 +406,17 @@ def eval_fn(model, ref_model, eval_device_loader, config, step):
         total_losses.append(eval_metrics["eval_total_losses"])
         total_weights += eval_metrics["eval_num_samples"]
 
+    xm.wait_device_ops()
+    last_step_completion = datetime.now()
     total_losses = sum(total_losses)
     avg_losses =  total_losses / total_weights
     metrics = {"total_losses": total_losses, "total_weights": total_weights}
     xm.add_step_closure(
         report_eval_metrics, args=(step, avg_losses, metrics))
+    new_time = datetime.now()
+    step_time_delta = new_time - last_step_completion
+    logger.info(f'sum(total_losses): {step_time_delta.total_seconds()}')
+
 
 def train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step):
     batch = next(train_device_loader)
