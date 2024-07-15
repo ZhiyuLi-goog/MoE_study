@@ -47,6 +47,7 @@ def extract_dialogue(input_text):
 
         # Append the extracted dialogue piece to the list
         dialogue_list.append({"role": role, "content": content})
+    return dialogue_list
 
 def fmt_size(num_bytes: int) -> str:
   assert num_bytes > 0
@@ -368,6 +369,7 @@ def get_data_device_iterator(config, tokenizer, mesh, load_from_cache_file=True)
             row["rejected"] = extract_dialogue(row["rejected"])
             row["prompt"] = row["chosen"][0]["content"]
             return row
+
         ds = ds.map(
             process,
             num_proc=num_proc,
