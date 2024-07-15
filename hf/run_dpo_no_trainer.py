@@ -54,7 +54,7 @@ logger = logging.get_logger(__name__)
 import torch_xla.core.xla_model as xm
 import torch_xla.debug.metrics as met
 
-import torch_xla.distributed.spmd as xs
+# import torch_xla.distributed.spmd as xs
 import torch_xla.runtime as xr
 
 import torch_xla.debug.profiler as xp
@@ -328,21 +328,7 @@ def get_batch_loss_metrics(
     return losses.mean(), metrics
 
 
-def prepare_model(model, config):
-    def shard_output(output, mesh):
-        from transformers.modeling_outputs import CausalLMOutputWithPast
-
-        real_output = None
-        if isinstance(output, torch.Tensor):
-            real_output = output
-        elif isinstance(output, tuple):
-            real_output = output[0]
-        elif hasattr(output, "logits"):
-            real_output = output.logits
-
-        if real_output is None:
-            raise ValueError("Something went wrong, the output of the model shouldn't be `None`")
-        xs.mark_sharding(real_output, mesh, ("fsdp", None, None))
+def prepare_model(model, config, spmd_mesh):
 
     auto_wrap_policy = None
     auto_wrapper_callable = None
@@ -371,24 +357,48 @@ def prepare_model(model, config):
             transformer_layer_cls=transformer_cls_to_wrap,
         )
 
-    if config.model.fsdp_config["xla_fsdp_grad_ckpt"]:
-        if model.config.use_cache:
-            logger.warning_once(
-                "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`."
-            )
-            model.config.use_cache = False
-        # Apply gradient checkpointing to auto-wrapped sub-modules if specified
-        def auto_wrapper_callable(m, *args, **kwargs):
-            target_cls = FSDPv2
-            return target_cls(checkpoint_module(m), *args, **kwargs)
+    # if config.model.fsdp_config["xla_fsdp_grad_ckpt"]:
+    #     if model.config.use_cache:
+    #         logger.warning_once(
+    #             "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`."
+    #         )
+    #         model.config.use_cache = False
+    #     # Apply gradient checkpointing to auto-wrapped sub-modules if specified
+    #     def auto_wrapper_callable(m, *args, **kwargs):
+    #         target_cls = FSDPv2
+    #         return target_cls(checkpoint_module(m), *args, **kwargs)
 
-    model = FSDPv2(
-                model,
-                shard_output=shard_output,
-                auto_wrap_policy=auto_wrap_policy,
-                auto_wrapper_callable=auto_wrapper_callable,
-            )
-    
+    # model = FSDPv2(
+    #             model,
+    #             shard_output=shard_output,
+    #             auto_wrap_policy=auto_wrap_policy,
+    #             auto_wrapper_callable=auto_wrapper_callable,
+    #         )
+    model.to("xla")
+    for name, param in model.named_parameters():
+        print('> [2D] Sharding tensor', name, param.shape)
+
+        # Here we intentionally skip layernorm and moe.gate weights given they are small.
+        if 'embed_tokens' in name:
+            xs.mark_sharding(param, spmd_mesh, ('fsdp', 'tensor'))  # needed to have activations fully sharded.
+        elif 'q_proj' in name or 'k_proj' in name or 'v_proj' in name:
+            xs.mark_sharding(param, spmd_mesh, ('tensor', 'fsdp'))
+        elif 'o_proj' in name:
+            xs.mark_sharding(param, spmd_mesh, ('fsdp', 'tensor'))
+        elif 'w1' in name or 'w3' in name:
+            xs.mark_sharding(param, spmd_mesh, ('tensor', 'fsdp'))
+        elif 'w2' in name:
+            xs.mark_sharding(param, spmd_mesh, ('fsdp', 'tensor'))
+        elif 'lm_head' in name:
+            xs.mark_sharding(param, spmd_mesh, (('tensor', 'fsdp'), None))  # keep this fsdp.
+
+        for i, block in enumerate(model.model.layers):
+            xs.apply_backward_optimization_barrier(model.model.layers[i])
+        from torch_xla.distributed.fsdp import checkpoint_module
+        for i, block in enumerate(model.model.layers):
+            model.model.layers[i] = checkpoint_module(block)
+        print(f'{name} {torch_xla._XLAC._get_xla_sharding_spec(param)}')
+
     return model
 
 
@@ -440,9 +450,8 @@ def main(config: DictConfig):
         OmegaConf.save(config, f)
 
     num_devices = xr.global_runtime_device_count()
-    mesh_shape = (num_devices, 1)
-    device_ids = np.array(range(num_devices))
-    mesh = xs.Mesh(device_ids, mesh_shape, axis_names=("fsdp", "tensor") )
+    tensor_parallelism = config.tensor_parallelism
+    mesh = xs.Mesh(np.array(range(num_devices)), (num_devices // tensor_parallelism, tensor_parallelism), axis_names=("fsdp", "tensor"))
     xs.set_global_mesh(mesh)
 
     tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
@@ -458,6 +467,8 @@ def main(config: DictConfig):
     if config.model.config_path:
         model_config = AutoConfig.from_pretrained(config.model.config_path)
         model_config.static = True
+        model_config.gmm = False
+        model_config.gmm_stack = False
         model_config.flash_attention = True
         with torch.device("meta"):
             model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(model_torch_dtype)
@@ -466,7 +477,7 @@ def main(config: DictConfig):
             config.model.name_or_path, cache_dir=config.cache_local_dir, low_cpu_mem_usage=True, torch_dtype=model_torch_dtype)
     
     logger.info("model loaded")
-    model = prepare_model(model, config)
+    model = prepare_model(model, config, mesh)
     logger.info("model prepared")
 
     gc.collect()
@@ -482,16 +493,16 @@ def main(config: DictConfig):
             config.model.name_or_path, cache_dir=config.cache_local_dir, low_cpu_mem_usage=True, torch_dtype=model_torch_dtype)
     logger.info("ref_model loaded")
     ref_model.eval()
-    ref_model = prepare_model(ref_model, config)
+    ref_model = prepare_model(ref_model, config, mesh)
 
     logger.info("ref_model prepared")
     gc.collect()
     xm.mark_step()
     logger.info(f"cpu memory usage: {get_cpu_memory()}")
     if config.use_synthetic_data:
-        train_device_loader, eval_device_loader = get_synthetic_data_device_iterator(config, tokenizer, mesh)
+        train_device_loader, eval_device_loader = get_synthetic_data_device_iterator(config, tokenizer)
     else:
-        train_device_loader, eval_device_loader = get_data_device_iterator(config, tokenizer, mesh)
+        train_device_loader, eval_device_loader = get_data_device_iterator(config, tokenizer)
 
     global_batch_size = config.per_device_train_batch_size * num_devices
     # 'chosen_input_ids', 'chosen_attention_mask', 'rejected_input_ids', 'rejected_attention_mask', 'chosen_labels', 'rejected_labels'

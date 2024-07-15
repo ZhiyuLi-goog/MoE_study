@@ -67,12 +67,12 @@ def get_cpu_memory() -> str:
 class MultiHostDataLoadIterator:
     """fold get_next_batch_sharded into a iterator class"""
   
-    def __init__(self, data_loader, mesh):
+    def __init__(self, data_loader):
       self.device_loader = pl.MpDeviceLoader(
           data_loader,
           torch_xla.device(),
           # Shard the input's batch dimension along the `fsdp` axis, no sharding along other dimensions
-          input_sharding=xs.ShardingSpec(mesh, ('fsdp', None)))
+          input_sharding=xs.ShardingSpec(xs.get_global_mesh(), ('fsdp', 'tensor')))
       self.data_iterator = iter(self.device_loader)
   
     def reset(self):
@@ -149,13 +149,14 @@ class DPODataCollatorWithPadding:
 
         return padded_batch
 
-def get_synthetic_data_device_iterator(config, tokenizer, mesh):
+def get_synthetic_data_device_iterator(config, tokenizer):
     # Shard the input(data parallel).
     # Scale the batch size with num_devices since there will be only one
     # process that handles all runtime devices.
     assert xr.world_size() == 1
     num_devices = xr.global_runtime_device_count()
-    global_batch_size = int(config.per_device_train_batch_size * num_devices)
+    global_batch_size = int(config.per_device_train_batch_size * num_devices // config.tensor_parallelism)
+    print(f"{global_batch_size=}")
     data = {
         "chosen_input_ids": torch.randint(tokenizer.vocab_size, (global_batch_size, config.max_length), dtype=torch.int64),
         "chosen_attention_mask": torch.ones(global_batch_size, config.max_length, dtype=torch.int64),
@@ -175,7 +176,7 @@ def get_synthetic_data_device_iterator(config, tokenizer, mesh):
         sample_count=10,
     )
 
-    return MultiHostDataLoadIterator(train_loader, mesh), MultiHostDataLoadIterator(eval_loader, mesh)
+    return MultiHostDataLoadIterator(train_loader), MultiHostDataLoadIterator(eval_loader)
 
 
 def build_tokenized_answer(tokenizer, prompt, answer):
@@ -356,7 +357,7 @@ def tokenize_row(feature, tokenizer=None, truncation_mode="keep_start", max_leng
 
     return batch
 
-def get_data_device_iterator(config, tokenizer, mesh, load_from_cache_file=True):
+def get_data_device_iterator(config, tokenizer, load_from_cache_file=True):
 
     ds = load_dataset(config.datasets)
     num_proc = config.num_proc
@@ -414,7 +415,7 @@ def get_data_device_iterator(config, tokenizer, mesh, load_from_cache_file=True)
     data_collator = DPODataCollatorWithPadding(max_length=config.max_length)
 
     num_devices = xr.global_runtime_device_count()
-    global_batch_size = int(config.per_device_train_batch_size * num_devices)
+    global_batch_size = int(config.per_device_train_batch_size * num_devices // config.tensor_parallelism)
     train_loader, eval_loader = DataLoader(ds['train'], batch_size=global_batch_size, shuffle=True, drop_last=True, collate_fn=data_collator), DataLoader(ds['test'], batch_size=global_batch_size, collate_fn=data_collator, drop_last=True)
-    return MultiHostDataLoadIterator(train_loader, mesh), MultiHostDataLoadIterator(eval_loader, mesh)
+    return MultiHostDataLoadIterator(train_loader), MultiHostDataLoadIterator(eval_loader)
 
