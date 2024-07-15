@@ -487,9 +487,9 @@ def main(config: DictConfig):
     xm.mark_step()
     logger.info(f"cpu memory usage: {get_cpu_memory()}")
     if config.use_synthetic_data:
-        train_device_loader, eval_device_loader = get_synthetic_data_device_iterator(config, tokenizer, mesh)
+        train_device_loader, eval_device_loader = get_synthetic_data_device_iterator(config, tokenizer)
     else:
-        train_device_loader, eval_device_loader = get_data_device_iterator(config, tokenizer, mesh)
+        train_device_loader, eval_device_loader = get_data_device_iterator(config, tokenizer)
 
     global_batch_size = config.per_device_train_batch_size * num_devices
     # 'chosen_input_ids', 'chosen_attention_mask', 'rejected_input_ids', 'rejected_attention_mask', 'chosen_labels', 'rejected_labels'
