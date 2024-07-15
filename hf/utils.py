@@ -23,6 +23,31 @@ import torch
 from dataclasses import dataclass
 from torch.nn.utils.rnn import pad_sequence
 
+
+# GPT-4 generated 😄 Define a function to process the input and extract the dialogue into structured format
+def extract_dialogue(input_text):
+    # Split the input by lines and initialize variables
+    lines = input_text.strip().split("\n\n")
+    dialogue_list = []
+
+    # Iterate through each line and extract the dialogue
+    for line in lines:
+        # Check if the line starts with "Human" or "Assistant" and split accordingly
+        if line.startswith("Human:"):
+            role = "user"
+            content = line.replace("Human: ", "").strip()
+        elif line.startswith("Assistant:"):
+            role = "assistant"
+            content = line.replace("Assistant: ", "").strip()
+        else:
+            # If the line doesn't start with "Human" or "Assistant", it's part of the previous message's content
+            # Append it to the last message's content
+            dialogue_list[-1]["content"] += "\n\n" + line.strip()
+            continue
+
+        # Append the extracted dialogue piece to the list
+        dialogue_list.append({"role": role, "content": content})
+
 def fmt_size(num_bytes: int) -> str:
   assert num_bytes > 0
   for unit in ["B", "KiB", "MiB", "GiB"]:
@@ -336,6 +361,19 @@ def get_data_device_iterator(config, tokenizer, mesh, load_from_cache_file=True)
     num_proc = config.num_proc
     if num_proc > 1:
         raise ValueError(f"{config.num_proc=}, which is bigger than 1. HuggingFace treats SPMD as a single-device program.")
+    
+    if config.datasets == "Anthropic/hh-rlhf":
+        def process(row):
+            row["chosen"] = extract_dialogue(row["chosen"])
+            row["rejected"] = extract_dialogue(row["rejected"])
+            row["prompt"] = row["chosen"][0]["content"]
+            return row
+        ds = ds.map(
+            process,
+            num_proc=num_proc,
+            load_from_cache_file=load_from_cache_file,
+            desc="extract_dialogue",
+        )
 
     def process(row):
         row["chosen"] = tokenizer.apply_chat_template(row["chosen"], tokenize=False)
