@@ -440,10 +440,8 @@ def main(config: DictConfig):
         OmegaConf.save(config, f)
 
     num_devices = xr.global_runtime_device_count()
-    mesh_shape = (num_devices, 1)
-    device_ids = np.array(range(num_devices))
-    mesh = xs.Mesh(device_ids, mesh_shape, axis_names=("fsdp", "tensor") )
-    xs.set_global_mesh(mesh)
+    seq_parallelism = config.seq_parallelism
+    xs.set_global_mesh(xs.Mesh(np.array(range(num_devices)), (num_devices // seq_parallelism, seq_parallelism), axis_names=("fsdp", "seq")))
 
     tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
     if tokenizer.pad_token is None:

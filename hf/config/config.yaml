@@ -45,6 +45,7 @@ local_dir: /tmp
 
 # whether or not to generate samples during evaluation; disable for FSDP/TensorParallel
 #   is recommended, because they are slow
+seq_parallelism: 1
 sample_during_eval: true
 
 # how many model samples to generate during evaluation
