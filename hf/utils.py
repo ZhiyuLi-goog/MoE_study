@@ -72,7 +72,7 @@ class MultiHostDataLoadIterator:
           data_loader,
           torch_xla.device(),
           # Shard the input's batch dimension along the `fsdp` axis, no sharding along other dimensions
-          input_sharding=xs.ShardingSpec(xs.get_global_mesh(), ('fsdp', 'tensor')))
+          input_sharding=xs.ShardingSpec(xs.get_global_mesh(), ('fsdp', None)))
       self.data_iterator = iter(self.device_loader)
   
     def reset(self):

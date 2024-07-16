@@ -329,75 +329,98 @@ def get_batch_loss_metrics(
 
 
 def prepare_model(model, config, spmd_mesh):
+    if config.tensor_parallelism == 1:
+        def shard_output(output, mesh):
+            from transformers.modeling_outputs import CausalLMOutputWithPast
 
-    auto_wrap_policy = None
-    auto_wrapper_callable = None
+            real_output = None
+            if isinstance(output, torch.Tensor):
+                real_output = output
+            elif isinstance(output, tuple):
+                real_output = output[0]
+            elif hasattr(output, "logits"):
+                real_output = output.logits
 
-    default_transformer_cls_names_to_wrap = getattr(model, "_no_split_modules", None)
-    fsdp_transformer_layer_cls_to_wrap = config.model.fsdp_config.get(
-        "transformer_layer_cls_to_wrap", default_transformer_cls_names_to_wrap
-    )
+            if real_output is None:
+                raise ValueError("Something went wrong, the output of the model shouldn't be `None`")
+            xs.mark_sharding(real_output, mesh, ("fsdp", None, None))
 
-    if config.model.fsdp_config["min_num_params"] > 0:
-        auto_wrap_policy = functools.partial(
-            size_based_auto_wrap_policy, min_num_params=config.model.fsdp_config["min_num_params"]
-        )
-    elif fsdp_transformer_layer_cls_to_wrap is not None:
-        transformer_cls_to_wrap = set()
-        for layer_class in fsdp_transformer_layer_cls_to_wrap:
-            transformer_cls = get_module_class_from_name(model, layer_class)
-            if transformer_cls is None:
-                raise Exception("Could not find the transformer layer class to wrap in the model.")
-            else:
-                transformer_cls_to_wrap.add(transformer_cls)
+        auto_wrap_policy = None
+        auto_wrapper_callable = None
 
-        auto_wrap_policy = functools.partial(
-            transformer_auto_wrap_policy,
-            # Transformer layer class to wrap
-            transformer_layer_cls=transformer_cls_to_wrap,
+        default_transformer_cls_names_to_wrap = getattr(model, "_no_split_modules", None)
+        fsdp_transformer_layer_cls_to_wrap = config.model.fsdp_config.get(
+            "transformer_layer_cls_to_wrap", default_transformer_cls_names_to_wrap
         )
 
-    # if config.model.fsdp_config["xla_fsdp_grad_ckpt"]:
-    #     if model.config.use_cache:
-    #         logger.warning_once(
-    #             "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`."
-    #         )
-    #         model.config.use_cache = False
-    #     # Apply gradient checkpointing to auto-wrapped sub-modules if specified
-    #     def auto_wrapper_callable(m, *args, **kwargs):
-    #         target_cls = FSDPv2
-    #         return target_cls(checkpoint_module(m), *args, **kwargs)
+        if config.model.fsdp_config["min_num_params"] > 0:
+            auto_wrap_policy = functools.partial(
+                size_based_auto_wrap_policy, min_num_params=config.model.fsdp_config["min_num_params"]
+            )
+        elif fsdp_transformer_layer_cls_to_wrap is not None:
+            transformer_cls_to_wrap = set()
+            for layer_class in fsdp_transformer_layer_cls_to_wrap:
+                transformer_cls = get_module_class_from_name(model, layer_class)
+                if transformer_cls is None:
+                    raise Exception("Could not find the transformer layer class to wrap in the model.")
+                else:
+                    transformer_cls_to_wrap.add(transformer_cls)
 
-    # model = FSDPv2(
-    #             model,
-    #             shard_output=shard_output,
-    #             auto_wrap_policy=auto_wrap_policy,
-    #             auto_wrapper_callable=auto_wrapper_callable,
-    #         )
-    model.to("xla")
-    for name, param in model.named_parameters():
-        print('> [2D] Sharding tensor', name, param.shape)
+            auto_wrap_policy = functools.partial(
+                transformer_auto_wrap_policy,
+                # Transformer layer class to wrap
+                transformer_layer_cls=transformer_cls_to_wrap,
+            )
 
-        # Here we intentionally skip layernorm and moe.gate weights given they are small.
-        if 'embed_tokens' in name:
-            xs.mark_sharding(param, spmd_mesh, ('fsdp', 'tensor'))  # needed to have activations fully sharded.
-        elif 'q_proj' in name or 'k_proj' in name or 'v_proj' in name:
-            xs.mark_sharding(param, spmd_mesh, ('tensor', 'fsdp'))
-        elif 'o_proj' in name:
-            xs.mark_sharding(param, spmd_mesh, ('fsdp', 'tensor'))
-        elif 'w1' in name or 'w3' in name:
-            xs.mark_sharding(param, spmd_mesh, ('tensor', 'fsdp'))
-        elif 'w2' in name:
-            xs.mark_sharding(param, spmd_mesh, ('fsdp', 'tensor'))
-        elif 'lm_head' in name:
-            xs.mark_sharding(param, spmd_mesh, (('tensor', 'fsdp'), None))  # keep this fsdp.
+        if config.model.fsdp_config["xla_fsdp_grad_ckpt"]:
+            if model.config.use_cache:
+                logger.warning_once(
+                    "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`."
+                )
+                model.config.use_cache = False
+            # Apply gradient checkpointing to auto-wrapped sub-modules if specified
+            def auto_wrapper_callable(m, *args, **kwargs):
+                target_cls = FSDPv2
+                return target_cls(checkpoint_module(m), *args, **kwargs)
+
+        model = FSDPv2(
+                    model,
+                    shard_output=shard_output,
+                    auto_wrap_policy=auto_wrap_policy,
+                    auto_wrapper_callable=auto_wrapper_callable,
+                )
+    else:
+        model.to("xla")
+        for name, param in model.named_parameters():
+            print('> [2D] Sharding tensor', name, param.shape)
+
+            # Here we intentionally skip layernorm and moe.gate weights given they are small.
+            if 'embed_tokens' in name:
+                xs.mark_sharding(param, spmd_mesh, ('fsdp', 'tensor'))  # needed to have activations fully sharded.
+            elif 'q_proj' in name or 'k_proj' in name or 'v_proj' in name:
+                xs.mark_sharding(param, spmd_mesh, ('tensor', 'fsdp'))
+            elif 'o_proj' in name:
+                xs.mark_sharding(param, spmd_mesh, ('fsdp', 'tensor'))
+            elif 'w1' in name or 'w3' in name:
+                xs.mark_sharding(param, spmd_mesh, ('tensor', 'fsdp'))
+            elif 'w2' in name:
+                xs.mark_sharding(param, spmd_mesh, ('fsdp', 'tensor'))
+            elif 'lm_head' in name:
+                xs.mark_sharding(param, spmd_mesh, ('tensor', 'fsdp'))  # keep this fsdp.
+
+            logger.info(f'{name} {torch_xla._XLAC._get_xla_sharding_spec(param)}')
 
         for i, block in enumerate(model.model.layers):
             xs.apply_backward_optimization_barrier(model.model.layers[i])
-        from torch_xla.distributed.fsdp import checkpoint_module
+        logger.info("Applying gradient checkpointing")
+        if model.config.use_cache:
+            logger.warning_once(
+                "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`."
+            )
+            model.config.use_cache = False
+
         for i, block in enumerate(model.model.layers):
             model.model.layers[i] = checkpoint_module(block)
-        print(f'{name} {torch_xla._XLAC._get_xla_sharding_spec(param)}')
 
     return model
 
