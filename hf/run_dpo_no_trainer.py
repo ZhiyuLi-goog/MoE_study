@@ -538,10 +538,13 @@ def main(config: DictConfig):
 
     logger.info(f"cpu memory usage: {get_cpu_memory()}")
     for step in np.arange(start_step, config.max_steps):
+        if step == start_step:
+            eval_fn(model, ref_model, eval_device_loader, config, step)
         loss, metrics = train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step)
         if step >= start_step and step % config.report_metrics_freq == 0:
             xm.add_step_closure(
                 report_metrics, args=(step, loss, tracker, metrics))
+        # if step > start_step and step % config.eval_frequency == 0:
         if step > start_step and step % config.eval_frequency == 0:
             eval_fn(model, ref_model, eval_device_loader, config, step)
         if step == config.get("profile_step", None):
