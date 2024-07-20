@@ -155,7 +155,8 @@ def get_synthetic_data_device_iterator(config, tokenizer):
     # process that handles all runtime devices.
     assert xr.world_size() == 1
     num_devices = xr.global_runtime_device_count()
-    global_batch_size = int(config.per_device_train_batch_size * num_devices // config.tensor_parallelism)
+    global_batch_size = int(config.per_device_train_batch_size * num_devices)
+
     print(f"{global_batch_size=}")
     data = {
         "chosen_input_ids": torch.randint(tokenizer.vocab_size, (global_batch_size, config.max_length), dtype=torch.int64),
@@ -415,7 +416,7 @@ def get_data_device_iterator(config, tokenizer, load_from_cache_file=True):
     data_collator = DPODataCollatorWithPadding(max_length=config.max_length)
 
     num_devices = xr.global_runtime_device_count()
-    global_batch_size = int(config.per_device_train_batch_size * num_devices // config.tensor_parallelism)
+    global_batch_size = int(config.per_device_train_batch_size * num_devices)
     train_loader, eval_loader = DataLoader(ds['train'], batch_size=global_batch_size, shuffle=True, drop_last=True, collate_fn=data_collator), DataLoader(ds['test'], batch_size=global_batch_size, collate_fn=data_collator, drop_last=True)
     return MultiHostDataLoadIterator(train_loader), MultiHostDataLoadIterator(eval_loader)
 
