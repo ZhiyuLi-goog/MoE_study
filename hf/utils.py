@@ -25,32 +25,6 @@ from torch.nn.utils.rnn import pad_sequence
 import os
 
 
-# GPT-4 generated 😄 Define a function to process the input and extract the dialogue into structured format
-def extract_dialogue(input_text):
-    # Split the input by lines and initialize variables
-    lines = input_text.strip().split("\n\n")
-    dialogue_list = []
-
-    # Iterate through each line and extract the dialogue
-    for line in lines:
-        # Check if the line starts with "Human" or "Assistant" and split accordingly
-        if line.startswith("Human:"):
-            role = "user"
-            content = line.replace("Human: ", "").strip()
-        elif line.startswith("Assistant:"):
-            role = "assistant"
-            content = line.replace("Assistant: ", "").strip()
-        else:
-            # If the line doesn't start with "Human" or "Assistant", it's part of the previous message's content
-            # Append it to the last message's content
-            dialogue_list[-1]["content"] += "\n\n" + line.strip()
-            continue
-
-        # Append the extracted dialogue piece to the list
-        dialogue_list.append({"role": role, "content": content})
-    return dialogue_list
-
-
 def fmt_size(num_bytes: int) -> str:
   assert num_bytes > 0
   for unit in ["B", "KiB", "MiB", "GiB"]:
@@ -180,60 +154,9 @@ def get_synthetic_data_device_iterator(config, tokenizer, mesh):
     return MultiHostDataLoadIterator(train_loader, mesh), MultiHostDataLoadIterator(eval_loader, mesh)
 
 
-def build_tokenized_answer(tokenizer, prompt, answer):
-    """
-    Llama tokenizer does satisfy `enc(a + b) = enc(a) + enc(b)`.
-    It does ensure `enc(a + b) = enc(a) + enc(a + b)[len(enc(a)):]`.
-    Reference:
-        https://github.com/EleutherAI/lm-evaluation-harness/pull/531#issuecomment-1595586257
-    """
-
-    full_tokenized = tokenizer(prompt + answer, add_special_tokens=False)
-    prompt_input_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
-
-    answer_input_ids = full_tokenized["input_ids"][len(prompt_input_ids) :]
-    answer_attention_mask = full_tokenized["attention_mask"][len(prompt_input_ids) :]
-
-    # Concat tokens to form `enc(a) + enc(a + b)[len(enc(a)):]`
-    full_concat_input_ids = np.concatenate([prompt_input_ids, answer_input_ids])
-
-    # Prepare input tokens for token by token comparison
-    full_input_ids = np.array(full_tokenized["input_ids"])
-
-    if len(full_input_ids) != len(full_concat_input_ids):
-        raise ValueError("Prompt input ids and answer input ids should have the same length.")
-
-    # On some tokenizers, like Llama-2 tokenizer, there are occasions where tokens
-    # can be merged together when tokenizing prompt+answer. This could result
-    # on the last token from the prompt being different when tokenized on its own
-    # vs when done as prompt+answer.
-    response_token_ids_start_idx = len(prompt_input_ids)
-
-    # If tokenized prompt is different than both prompt+answer, then it means the
-    # last token has changed due to merging.
-    if prompt_input_ids != full_tokenized["input_ids"][:response_token_ids_start_idx]:
-        response_token_ids_start_idx -= 1
-
-    prompt_input_ids = full_tokenized["input_ids"][:response_token_ids_start_idx]
-    prompt_attention_mask = full_tokenized["attention_mask"][:response_token_ids_start_idx]
-
-    if len(prompt_input_ids) != len(prompt_attention_mask):
-        raise ValueError("Prompt input ids and attention mask should have the same length.")
-
-    answer_input_ids = full_tokenized["input_ids"][response_token_ids_start_idx:]
-    answer_attention_mask = full_tokenized["attention_mask"][response_token_ids_start_idx:]
-
-    return dict(
-        prompt_input_ids=prompt_input_ids,
-        prompt_attention_mask=prompt_attention_mask,
-        input_ids=answer_input_ids,
-        attention_mask=answer_attention_mask,
-    )
-
-
 def extract_anthropic_prompt(chosen, rejected):
     """Extract the anthropic prompt from a prompt and response pair."""
-    search_term = "\n\nassistant:"
+    search_term = "\n\nAssistant:"
     common_prefix = os.path.commonprefix([chosen, rejected])
     search_term_idx = common_prefix.rfind(search_term)
     assert search_term_idx != -1, f"Prompt and response does not contain '{search_term}'"
@@ -253,118 +176,58 @@ def tokenize_row(feature, tokenizer=None, truncation_mode="keep_end", max_length
     """
     label_pad_token_id = -100
     batch = {}
-    prompt = feature["prompt"]
     chosen = feature["chosen"]
     rejected = feature["rejected"]
+    prompt = feature["prompt"]
 
-    # Check issues below for more details
-    #  1. https://github.com/huggingface/trl/issues/907
-    #  2. https://github.com/EleutherAI/lm-evaluation-harness/pull/531#issuecomment-1595586257
-    #  3. https://github.com/LianjiaTech/BELLE/issues/337
-
-    if not isinstance(prompt, str):
-        raise ValueError(f"prompt should be an str but got {type(prompt)}")
+    chosen_tokens = tokenizer(chosen, add_special_tokens=False)
+    rejected_tokens = tokenizer(rejected, add_special_tokens=False)
     prompt_tokens = tokenizer(prompt, add_special_tokens=False)
-    prompt_tokens = {f"prompt_{k}": v for k, v in prompt_tokens.items()}
-
-    if not isinstance(chosen, str):
-        raise ValueError(f"chosen should be an str but got {type(chosen)}")
-    chosen_tokens = build_tokenized_answer(tokenizer, prompt, chosen)
-
-    if not isinstance(rejected, str):
-        raise ValueError(f"rejected should be an str but got {type(rejected)}")
-    rejected_tokens = build_tokenized_answer(tokenizer, prompt, rejected)
-
-    # Last prompt token might get merged by tokenizer and
-    # it should not be included for generation if that happens
-    prompt_len_input_ids = len(prompt_tokens["prompt_input_ids"])
-
-    chosen_prompt_len_input_ids = len(chosen_tokens["prompt_input_ids"])
-    rejected_prompt_len_input_ids = len(rejected_tokens["prompt_input_ids"])
-    prompt_len_input_ids = min(chosen_prompt_len_input_ids, rejected_prompt_len_input_ids)
-
-    for k, v in prompt_tokens.items():
-        prompt_tokens[k] = v[:prompt_len_input_ids]
-
-    # Make sure prompts only have one different token at most an
-    # and length only differs by 1 at most
-    num_diff_tokens = sum(
-        [a != b for a, b in zip(chosen_tokens["prompt_input_ids"], rejected_tokens["prompt_input_ids"])]
-    )
-    num_diff_len = abs(chosen_prompt_len_input_ids - rejected_prompt_len_input_ids)
-    if num_diff_tokens > 1 or num_diff_len > 1:
-        raise ValueError(
-            "Chosen and rejected prompt_input_ids might only differ on the "
-            "last token due to tokenizer merge ops."
-        )
-
-    # add BOS token to head of prompt. Avoid adding if it's already there
-    bos_token_id = tokenizer.bos_token_id
-    if prompt_len_input_ids == 0 or bos_token_id != prompt_tokens["prompt_input_ids"][0]:
-        prompt_tokens["prompt_input_ids"] = [bos_token_id] + prompt_tokens["prompt_input_ids"]
-        prompt_tokens["prompt_attention_mask"] = [1] + prompt_tokens["prompt_attention_mask"]
-    if chosen_prompt_len_input_ids == 0 or bos_token_id != chosen_tokens["prompt_input_ids"][0]:
-        chosen_tokens["prompt_input_ids"] = [bos_token_id] + chosen_tokens["prompt_input_ids"]
-        chosen_tokens["prompt_attention_mask"] = [1] + chosen_tokens["prompt_attention_mask"]
-    if rejected_prompt_len_input_ids == 0 or bos_token_id != rejected_tokens["prompt_input_ids"][0]:
-        rejected_tokens["prompt_input_ids"] = [bos_token_id] + rejected_tokens["prompt_input_ids"]
-        rejected_tokens["prompt_attention_mask"] = [1] + rejected_tokens["prompt_attention_mask"]
 
     # add EOS token to end of answer. Avoid adding if it's already there
     eos_token_id = tokenizer.eos_token_id
-    if len(chosen_tokens["input_ids"]) == 0 or eos_token_id != chosen_tokens["input_ids"][-1]:
+    if eos_token_id != chosen_tokens["input_ids"][-1]:
         chosen_tokens["input_ids"].append(eos_token_id)
-        chosen_tokens["attention_mask"].append(1)
-    if len(rejected_tokens["input_ids"]) == 0 or eos_token_id != rejected_tokens["input_ids"][-1]:
+    if eos_token_id != rejected_tokens["input_ids"][-1]:
         rejected_tokens["input_ids"].append(eos_token_id)
         rejected_tokens["attention_mask"].append(1)
-
-    longer_response_length = max(len(chosen_tokens["input_ids"]), len(rejected_tokens["input_ids"]))
+    longer_response_length = max(len(chosen_tokens['input_ids']), len(rejected_tokens['input_ids']))
 
     # if combined sequence is too long, truncate the prompt
-    for answer_tokens in [chosen_tokens, rejected_tokens, prompt_tokens]:
-        if len(answer_tokens["prompt_input_ids"]) + longer_response_length > max_length:
-            if truncation_mode == "keep_start":
-                for k in ["prompt_input_ids", "prompt_attention_mask"]:
-                    answer_tokens[k] = answer_tokens[k][: max_prompt_length]
-            elif truncation_mode == "keep_end":
-                for k in ["prompt_input_ids", "prompt_attention_mask"]:
-                    answer_tokens[k] = answer_tokens[k][-max_prompt_length :]
-            else:
-                raise ValueError(f"Unknown truncation mode: {truncation_mode}")
+    if len(prompt_tokens['input_ids']) + longer_response_length > max_length:
+        if truncation_mode == 'keep_start':
+            prompt_tokens = {k: v[:max_prompt_length] for k, v in prompt_tokens.items()}
+        elif truncation_mode == 'keep_end':
+            prompt_tokens = {k: v[-max_prompt_length:] for k, v in prompt_tokens.items()}
+        else:
+            raise ValueError(f'Unknown truncation mode: {truncation_mode}')
 
     # if that's still too long, truncate the response
-    for answer_tokens in [chosen_tokens, rejected_tokens]:
-        if len(answer_tokens["prompt_input_ids"]) + longer_response_length > max_length:
-            for k in ["input_ids", "attention_mask"]:
-                answer_tokens[k] = answer_tokens[k][: max_length - max_prompt_length]
+    if len(prompt_tokens['input_ids']) + longer_response_length > max_length:
+        chosen_tokens = {k: v[:max_length - max_prompt_length] for k, v in chosen_tokens.items()}
+        rejected_tokens = {k: v[:max_length - max_prompt_length] for k, v in rejected_tokens.items()}
 
-    # Create labels/torc
-    chosen_sequence_tokens = {
-        k: chosen_tokens[f"prompt_{k}"] + chosen_tokens[k] for k in ["input_ids", "attention_mask"]
-    }
-    rejected_sequence_tokens = {
-        k: rejected_tokens[f"prompt_{k}"] + rejected_tokens[k] for k in ["input_ids", "attention_mask"]
-    }
-    chosen_sequence_tokens["labels"] = chosen_sequence_tokens["input_ids"][:]
-    chosen_sequence_tokens["labels"][: len(chosen_tokens["prompt_input_ids"])] = [
-        label_pad_token_id
-    ] * len(chosen_tokens["prompt_input_ids"])
-    rejected_sequence_tokens["labels"] = rejected_sequence_tokens["input_ids"][:]
-    rejected_sequence_tokens["labels"][: len(rejected_tokens["prompt_input_ids"])] = [
-        label_pad_token_id
-    ] * len(rejected_tokens["prompt_input_ids"])
+    # Create labels
+    chosen_sequence_tokens = {k: prompt_tokens[k] + chosen_tokens[k] for k in chosen_tokens}
+    rejected_sequence_tokens = {k: prompt_tokens[k] + rejected_tokens[k] for k in rejected_tokens}
+    chosen_sequence_tokens['labels'] = chosen_sequence_tokens['input_ids'][:]
+    chosen_sequence_tokens['labels'][:len(prompt_tokens['input_ids'])] = [label_pad_token_id] * len(prompt_tokens['input_ids'])
+    rejected_sequence_tokens['labels'] = rejected_sequence_tokens['input_ids'][:]
+    rejected_sequence_tokens['labels'][:len(prompt_tokens['input_ids'])] = [label_pad_token_id] * len(prompt_tokens['input_ids'])
 
-    for k, toks in {
-        "chosen_": chosen_sequence_tokens,
-        "rejected_": rejected_sequence_tokens,
-        "": prompt_tokens,
-    }.items():
+    batch = {}
+
+    batch['prompt'] = prompt
+    batch['chosen'] = prompt + chosen
+    batch['rejected'] = prompt + rejected
+    batch['chosen_response_only'] = chosen
+    batch['rejected_response_only'] = rejected
+
+    for k, toks in {'chosen': chosen_sequence_tokens, 'rejected': rejected_sequence_tokens, 'prompt': prompt_tokens}.items():
         for type_key, tokens in toks.items():
-            if type_key == "token_type_ids":
+            if type_key == 'token_type_ids':
                 continue
-            batch[f"{k}{type_key}"] = tokens
-
+            batch[f'{k}_{type_key}'] = np.array(tokens)
     return batch
 
 def get_data_device_iterator(config, tokenizer, mesh, load_from_cache_file=True):
@@ -374,30 +237,19 @@ def get_data_device_iterator(config, tokenizer, mesh, load_from_cache_file=True)
     if num_proc > 1:
         raise ValueError(f"{config.num_proc=}, which is bigger than 1. HuggingFace treats SPMD as a single-device program.")
     
-    if config.datasets == "Anthropic/hh-rlhf":
+    if config.datasets == "trl-internal-testing/hh-rlhf-helpful-base-trl-style":
         def process(row):
-            row["chosen"] = extract_dialogue(row["chosen"])
-            row["rejected"] = extract_dialogue(row["rejected"])
+            row["chosen"] = tokenizer.apply_chat_template(row["chosen"], tokenize=False)
+            row["rejected"] = tokenizer.apply_chat_template(row["rejected"], tokenize=False)
             return row
 
+        # HuggingFace treats SPMD as a single-device program
         ds = ds.map(
             process,
             num_proc=num_proc,
             load_from_cache_file=load_from_cache_file,
-            desc="extract_dialogue",
+            desc="apply_chat_template",
         )
-    def process(row):
-        row["chosen"] = tokenizer.apply_chat_template(row["chosen"], tokenize=False)
-        row["rejected"] = tokenizer.apply_chat_template(row["rejected"], tokenize=False)
-        return row
-
-    # HuggingFace treats SPMD as a single-device program
-    ds = ds.map(
-        process,
-        num_proc=num_proc,
-        load_from_cache_file=load_from_cache_file,
-        desc="apply_chat_template",
-    )
 
     def split_prompt_and_responses(row):
         prompt = extract_anthropic_prompt(row["chosen"], row["rejected"])
