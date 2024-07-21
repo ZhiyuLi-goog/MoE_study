@@ -480,7 +480,7 @@ def print_batch(batch, tokenizer):
 
 def train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step, tokenizer):
     batch = next(train_device_loader)
-    if config.do_first_eval and step == start_step:
+    if step == start_step:
         print_batch(batch, tokenizer)
     optimizer.zero_grad()
     model.train()
@@ -608,7 +608,7 @@ def main(config: DictConfig):
 
     logger.info(f"cpu memory usage: {get_cpu_memory()}")
     for step in np.arange(start_step, config.max_steps):
-        if step == start_step:
+        if config.do_first_eval and step == start_step:
             eval_fn(model, ref_model, eval_device_loader, config, step)
         loss, metrics = train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step, tokenizer)
         if step >= start_step and step % config.report_metrics_freq == 0:
