@@ -398,20 +398,42 @@ def clip_gradient(model, config):
     return torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
 
 def eval_fn(model, ref_model, eval_device_loader, config, step):
+    prefix = 'eval_'
+    group_eval_metrics = {
+        f"{prefix}rewards/chosen": [],
+        f"{prefix}rewards/rejected": [],
+        f"{prefix}rewards/accuracies": [],
+        f"{prefix}rewards/margins": [],
+        f"{prefix}logps/rejected": [],
+        f"{prefix}logps/chosen": [],
+        f"{prefix}logits/rejected": [],
+        f"{prefix}logits/chosen": [],
+        f"{prefix}total_losses": [],
+        f"{prefix}num_samples": [],
+        f"{prefix}ppl": [],
+    }
+
     total_losses = []
     total_weights = 0.
     for eval_batch in eval_device_loader:
         model.eval()
         with torch.no_grad():
             _, eval_metrics = get_batch_loss_metrics(model, ref_model, eval_batch, "eval", beta=config.beta, config=config)
+        for k in group_eval_metrics:
+            group_eval_metrics[k].append(eval_metrics[k])
+
         total_losses.append(eval_metrics["eval_total_losses"])
         total_weights += eval_metrics["eval_num_samples"]
 
-    total_losses = sum(total_losses)
-    avg_losses =  total_losses / total_weights
-    metrics = {"total_losses": total_losses, "total_weights": total_weights}
+    for k, v in group_eval_metrics.items():
+        if k in (f"{prefix}num_samples", f"{prefix}total_losses"):
+            group_eval_metrics[k] = np.sum(v)
+        else:
+            group_eval_metrics[k] = np.mean(v)
+
+    avg_losses =  group_eval_metrics[f"{prefix}total_losses"] / group_eval_metrics[f"{prefix}num_samples"]
     xm.add_step_closure(
-        report_eval_metrics, args=(step, avg_losses, metrics))
+        report_eval_metrics, args=(step, avg_losses, group_eval_metrics))
 
 def strip_padding(tokens_list, padding_token_id):
     """
@@ -458,7 +480,7 @@ def print_batch(batch, tokenizer):
 
 def train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step, tokenizer):
     batch = next(train_device_loader)
-    if step == start_step:
+    if config.do_first_eval and step == start_step:
         print_batch(batch, tokenizer)
     optimizer.zero_grad()
     model.train()
