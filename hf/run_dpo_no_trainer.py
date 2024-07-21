@@ -324,6 +324,7 @@ def get_batch_loss_metrics(
     metrics[f"{prefix}logits/chosen"] = policy_chosen_logits.detach().mean()
     metrics[f"{prefix}total_losses"] = losses.detach().sum()
     metrics[f"{prefix}num_samples"] = batch["chosen_input_ids"].shape[0]
+    metrics[f"{prefix}ppl"] = torch.exp(policy_chosen_logps_avg.detach())
 
     return losses.mean(), metrics
 
@@ -412,8 +413,53 @@ def eval_fn(model, ref_model, eval_device_loader, config, step):
     xm.add_step_closure(
         report_eval_metrics, args=(step, avg_losses, metrics))
 
-def train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step):
+def strip_padding(tokens_list, padding_token_id):
+    """
+    Strips padding tokens from the beginning and end of each sequence in a list.
+
+    Args:
+    tokens_list (list of list of int): List containing sequences of token IDs.
+    padding_token_id (int): The token ID used for padding.
+
+    Returns:
+    list of list of int: The list of sequences with padding tokens removed.
+    """
+    def strip_single_sequence(sequence):
+        # Remove padding tokens from the start
+        start = 0
+        while start < len(sequence) and sequence[start] == padding_token_id:
+            start += 1
+        # Remove padding tokens from the end
+        end = len(sequence)
+        while end > start and sequence[end - 1] == padding_token_id:
+            end -= 1
+        return sequence[start:end]
+    
+    return [strip_single_sequence(seq) for seq in tokens_list]
+
+
+def decode(input_ids, tokenizer):
+    # Assuming `input_ids' is tensor of shape (batch_size, seq_length)
+    input_ids = input_ids.cpu().numpy()
+    input_ids = strip_padding(input_ids, padding_token_id=-100)
+    # Decode each sequence in the batch separately
+    decoded = [tokenizer.decode(seq, skip_special_tokens=True) for seq in input_ids]
+    decoded = [s.replace("\n\n", "") for s in decoded]
+    return decoded
+
+def print_batch(batch, tokenizer):
+    chosens = decode(batch['chosen_input_ids'], tokenizer)
+    chosen_onlys = decode(batch['chosen_labels'], tokenizer)
+    rejected_onlys = decode(batch['rejected_labels'], tokenizer)
+
+    # Log each pair of chosen and rejected sequences
+    for chosen, chosen_only, rejected_only, in zip(chosens, chosen_onlys, rejected_onlys):
+        logger.info(f"{chosen=}\n\n{chosen_only=}\n\n{rejected_only=}\n\n")
+
+def train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step, tokenizer):
     batch = next(train_device_loader)
+    if step == start_step:
+        print_batch(batch, tokenizer)
     optimizer.zero_grad()
     model.train()
     loss, metrics = get_batch_loss_metrics(model, ref_model, batch, "train", beta=config.beta, config=config)
@@ -459,6 +505,8 @@ def main(config: DictConfig):
         model_config = AutoConfig.from_pretrained(config.model.config_path)
         model_config.static = True
         model_config.flash_attention = True
+        model_config.gmm = False
+        model_config.gmm_stack = False
         with torch.device("meta"):
             model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(model_torch_dtype)
     else:
@@ -540,7 +588,7 @@ def main(config: DictConfig):
     for step in np.arange(start_step, config.max_steps):
         if step == start_step:
             eval_fn(model, ref_model, eval_device_loader, config, step)
-        loss, metrics = train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step)
+        loss, metrics = train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step, tokenizer)
         if step >= start_step and step % config.report_metrics_freq == 0:
             xm.add_step_closure(
                 report_metrics, args=(step, loss, tracker, metrics))
