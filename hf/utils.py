@@ -49,6 +49,7 @@ def extract_dialogue(input_text):
         dialogue_list.append({"role": role, "content": content})
     return dialogue_list
 
+
 def fmt_size(num_bytes: int) -> str:
   assert num_bytes > 0
   for unit in ["B", "KiB", "MiB", "GiB"]:
@@ -229,6 +230,14 @@ def build_tokenized_answer(tokenizer, prompt, answer):
     )
 
 
+def extract_anthropic_prompt(prompt_and_response):
+    """Extract the anthropic prompt from a prompt and response pair."""
+    search_term = "\n\nassistant:"
+    search_term_idx = prompt_and_response.rfind(search_term)
+    assert search_term_idx != -1, f"Prompt and response does not contain '{search_term}'"
+    return prompt_and_response[: search_term_idx + len(search_term)]
+
+
 def tokenize_row(feature, tokenizer=None, truncation_mode="keep_start", max_length=512, max_prompt_length=256) -> Dict:
     """Tokenize a single row from a DPO specific dataset.
 
@@ -242,7 +251,8 @@ def tokenize_row(feature, tokenizer=None, truncation_mode="keep_start", max_leng
     """
     label_pad_token_id = -100
     batch = {}
-    prompt = feature["prompt"]
+    prompt = extract_anthropic_prompt(feature["chosen"])
+    assert feature["chosen"][len(prompt):]  == feature["rejected"][len(prompt):]
     chosen = feature["chosen"]
     rejected = feature["rejected"]
 
@@ -367,7 +377,6 @@ def get_data_device_iterator(config, tokenizer, mesh, load_from_cache_file=True)
         def process(row):
             row["chosen"] = extract_dialogue(row["chosen"])
             row["rejected"] = extract_dialogue(row["rejected"])
-            row["prompt"] = row["chosen"][0]["content"]
             return row
 
         ds = ds.map(
@@ -376,7 +385,6 @@ def get_data_device_iterator(config, tokenizer, mesh, load_from_cache_file=True)
             load_from_cache_file=load_from_cache_file,
             desc="extract_dialogue",
         )
-
     def process(row):
         row["chosen"] = tokenizer.apply_chat_template(row["chosen"], tokenize=False)
         row["rejected"] = tokenizer.apply_chat_template(row["rejected"], tokenize=False)
