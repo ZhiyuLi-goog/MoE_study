@@ -22,6 +22,7 @@ from transformers import default_data_collator
 import torch
 from dataclasses import dataclass
 from torch.nn.utils.rnn import pad_sequence
+import os
 
 
 # GPT-4 generated 😄 Define a function to process the input and extract the dialogue into structured format
@@ -230,15 +231,16 @@ def build_tokenized_answer(tokenizer, prompt, answer):
     )
 
 
-def extract_anthropic_prompt(prompt_and_response):
+def extract_anthropic_prompt(chosen, rejected):
     """Extract the anthropic prompt from a prompt and response pair."""
     search_term = "\n\nassistant:"
-    search_term_idx = prompt_and_response.rfind(search_term)
+    common_prefix = os.path.commonprefix([chosen, rejected])
+    search_term_idx = common_prefix.rfind(search_term)
     assert search_term_idx != -1, f"Prompt and response does not contain '{search_term}'"
-    return prompt_and_response[: search_term_idx + len(search_term)]
+    return chosen[: search_term_idx + len(search_term)]
 
 
-def tokenize_row(feature, tokenizer=None, truncation_mode="keep_start", max_length=512, max_prompt_length=256) -> Dict:
+def tokenize_row(feature, tokenizer=None, truncation_mode="keep_end", max_length=512, max_prompt_length=256) -> Dict:
     """Tokenize a single row from a DPO specific dataset.
 
     At this stage, we don't convert to PyTorch tensors yet; we just handle the truncation
@@ -251,8 +253,7 @@ def tokenize_row(feature, tokenizer=None, truncation_mode="keep_start", max_leng
     """
     label_pad_token_id = -100
     batch = {}
-    prompt = extract_anthropic_prompt(feature["chosen"])
-    assert feature["chosen"][len(prompt):]  == feature["rejected"][len(prompt):]
+    prompt = feature["prompt"]
     chosen = feature["chosen"]
     rejected = feature["rejected"]
 
@@ -396,6 +397,21 @@ def get_data_device_iterator(config, tokenizer, mesh, load_from_cache_file=True)
         num_proc=num_proc,
         load_from_cache_file=load_from_cache_file,
         desc="apply_chat_template",
+    )
+
+    def split_prompt_and_responses(row):
+        prompt = extract_anthropic_prompt(row["chosen"], row["rejected"])
+        return {
+            "prompt": prompt,
+            "chosen": row["chosen"][len(prompt):],
+            "rejected": row["rejected"][len(prompt):],
+            }
+
+    ds = ds.map(
+        split_prompt_and_responses,
+        num_proc=num_proc,
+        load_from_cache_file=load_from_cache_file,
+        desc="split_prompt_and_responses",
     )
 
     ds = ds.map(partial(tokenize_row, tokenizer=tokenizer, max_prompt_length=config.max_prompt_length, max_length=config.max_length), num_proc=num_proc, load_from_cache_file=load_from_cache_file, desc="tokenize_row")
