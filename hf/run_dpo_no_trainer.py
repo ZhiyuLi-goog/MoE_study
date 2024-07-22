@@ -427,9 +427,9 @@ def eval_fn(model, ref_model, eval_device_loader, config, step):
 
     for k, v in group_eval_metrics.items():
         if k in (f"{prefix}num_samples", f"{prefix}total_losses"):
-            group_eval_metrics[k] = np.sum(v)
+            group_eval_metrics[k] = sum(v) 
         else:
-            group_eval_metrics[k] = np.mean(v)
+            group_eval_metrics[k] = sum(v) / len(v)
 
     avg_losses =  group_eval_metrics[f"{prefix}total_losses"] / group_eval_metrics[f"{prefix}num_samples"]
     xm.add_step_closure(
