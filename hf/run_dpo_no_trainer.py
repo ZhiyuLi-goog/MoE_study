@@ -244,7 +244,7 @@ def concatenated_forward(
     )
 
     labels = concatenated_batch["concatenated_labels"].clone()
-    nll_loss = cross_entropy_loss(all_logits[:len_chosen], labels[:len_chosen])
+    nll_loss = cross_entropy_loss(all_logits[:len_chosen], batch["chosen_input_ids"])
 
     chosen_logps = all_logps[:len_chosen]
     rejected_logps = all_logps[len_chosen:]
@@ -427,7 +427,7 @@ def eval_fn(model, ref_model, eval_device_loader, config, step):
 
     for k, v in group_eval_metrics.items():
         if k in (f"{prefix}num_samples", f"{prefix}total_losses"):
-            group_eval_metrics[k] = sum(v) 
+            group_eval_metrics[k] = sum(v)
         else:
             group_eval_metrics[k] = sum(v) / len(v)
 
@@ -472,11 +472,12 @@ def decode(input_ids, tokenizer):
 def print_batch(batch, tokenizer):
     chosens = decode(batch['chosen_input_ids'], tokenizer)
     chosen_onlys = decode(batch['chosen_labels'], tokenizer)
+    rejecteds = decode(batch['rejected_input_ids'], tokenizer)
     rejected_onlys = decode(batch['rejected_labels'], tokenizer)
 
     # Log each pair of chosen and rejected sequences
-    for chosen, chosen_only, rejected_only, in zip(chosens, chosen_onlys, rejected_onlys):
-        logger.info(f"{chosen=}\n\n{chosen_only=}\n\n{rejected_only=}\n\n")
+    for chosen, rejected, chosen_only, rejected_only, in zip(chosens, rejecteds, chosen_onlys, rejected_onlys):
+        logger.info(f"{chosen=}\n\n{rejected=}\n\n{chosen_only=}\n\n{rejected_only=}\n\n")
 
 def train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step, tokenizer):
     batch = next(train_device_loader)
