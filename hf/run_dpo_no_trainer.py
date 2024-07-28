@@ -514,7 +514,11 @@ def main(config: DictConfig):
     mesh = xs.Mesh(device_ids, mesh_shape, axis_names=("fsdp", "tensor") )
     xs.set_global_mesh(mesh)
 
-    tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
+    if config.model.name_or_path == "mistralai/Mixtral-8x22B-v0.1":
+        # sentencepiece mismatch in a recent commit https://huggingface.co/mistralai/Mixtral-8x22B-v0.1/discussions/9
+        tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path, revision="76fa593")
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     if tokenizer.chat_template is None:
@@ -535,6 +539,11 @@ def main(config: DictConfig):
     else:
         model = AutoModelForCausalLM.from_pretrained(
             config.model.name_or_path, cache_dir=config.cache_local_dir, low_cpu_mem_usage=True, torch_dtype=model_torch_dtype)
+    
+    if tokenizer.vocab_size != model.config.vocab_size:
+        logger.warning(
+            f"Found mismatch between {tokenizer.vocab_size=} and {model.config.vocab_size}"
+        )
     
     logger.info("model loaded")
     model = prepare_model(model, config)
