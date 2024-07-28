@@ -184,6 +184,8 @@ def get_batch_logps(
 
 def cross_entropy_loss(logits, labels):
     # Flatten the tokens
+    logits = logits[..., :-1, :].contiguous()
+    labels = labels[..., 1:].contiguous()
     loss_fct = nn.CrossEntropyLoss()
     logits = logits.view(-1, logits.shape[-1])
     labels = labels.view(-1)
@@ -544,7 +546,7 @@ def main(config: DictConfig):
         logger.warning(
             f"Found mismatch between {tokenizer.vocab_size=} and {model.config.vocab_size}"
         )
-    
+
     logger.info("model loaded")
     model = prepare_model(model, config)
     logger.info("model prepared")
