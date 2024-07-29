@@ -105,3 +105,4 @@ profile_logdir: null
 profile_step: null
 
 checkpoint_manager_path: null
+flash_attention: True

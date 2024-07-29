@@ -535,7 +535,7 @@ def main(config: DictConfig):
     if config.model.config_path:
         model_config = AutoConfig.from_pretrained(config.model.config_path)
         model_config.static = True
-        model_config.flash_attention = True
+        model_config.flash_attention = config.flash_attention
         model_config.gmm = False
         model_config.gmm_stack = False
         with torch.device("meta"):
