@@ -602,7 +602,7 @@ def main(config: DictConfig):
         del state_dict
         xm.mark_step()
         for k, v in model.state_dict().items():
-            logger.info(f"before {k}: {v.dtype} {v.mean()}")
+            logger.info(f"after {k}: {v.dtype} {v.mean()}")
         logger.info("checkpoint loaded")
     else:
         model.apply(model._init_weights)
