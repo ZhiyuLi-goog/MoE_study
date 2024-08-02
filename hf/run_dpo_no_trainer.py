@@ -597,12 +597,12 @@ def main(config: DictConfig):
             'model': model.state_dict(),
         }
         ckpt_manager.restore(0, state_dict)
-        for k, v in state_dict['model'].items():
-            logger.info(f"after {k}: {v.dtype} {v.mean()}")
         model.load_state_dict(state_dict['model'])
         ref_model.load_state_dict(state_dict['model'])
         del state_dict
         xm.mark_step()
+        for k, v in model.state_dict().items():
+            logger.info(f"before {k}: {v.dtype} {v.mean()}")
         logger.info("checkpoint loaded")
     else:
         model.apply(model._init_weights)
