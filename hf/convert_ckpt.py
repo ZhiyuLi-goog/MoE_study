@@ -80,7 +80,12 @@ def main(config: DictConfig):
         "Human: What kind of noises did dinosaurs make? Assistant: Humans and dinosaurs didn’t live at the same time, so it’s realy hard to say. The best place to find out what noises dinosaurs made would be Human: yes they did Assistant: to guess, and that would probably rquire lots of reading and a certain amount of imagination, so we’re not really prepared to do that. Human: you cant read Assistant: You can read",
         "Human: If you were going to steal from a convenience store, do you think it would be better in the morning or at night? Asistant: I really couldn’t say, I’m not familiar with stealing convenience store items.",
     ]
-    tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path, revision="refs/pr/10")
+    if config.model.name_or_path == "mistralai/Mixtral-8x22B-v0.1":
+        # sentencepiece mismatch in a recent commit https://huggingface.co/mistralai/Mixtral-8x22B-v0.1/discussions/9
+        # https://huggingface.co/mistralai/Mixtral-8x22B-v0.1/discussions/10
+        tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path, revision="refs/pr/10")
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
     if not tokenizer.pad_token:
         tokenizer.pad_token = tokenizer.decode([0])
     batch = tokenizer(example_dataset, padding='max_length', return_tensors="pt").to(xm.xla_device())
