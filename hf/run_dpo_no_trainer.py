@@ -401,6 +401,24 @@ def clip_gradient(model, config):
     """Clip the gradient norm of the parameters of an FSDP policy, gathering the gradients across all GPUs."""
     return torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
 
+def eval_fn_ppl(model, eval_device_loader):
+    total_losses = []
+    for eval_batch in eval_device_loader:
+        model.eval()
+        with torch.no_grad():
+            loss = model(
+                eval_batch["chosen_input_ids"],
+                attention_mask=eval_batch["chosen_attention_mask"],
+                labels=eval_batch["chosen_input_ids"],
+                use_cache=False,
+                ).loss
+            total_losses.append(loss)
+
+    average_loss = sum(total_losses) / len(total_losses)
+    average_ppl = torch.exp(average_loss)
+    logger.info(f"{average_ppl=}")
+
+
 def eval_fn(model, ref_model, eval_device_loader, config, step):
     prefix = 'eval_'
     group_eval_metrics = {
@@ -624,6 +642,8 @@ def main(config: DictConfig):
 
     logger.info(f"cpu memory usage: {get_cpu_memory()}")
     for step in np.arange(start_step, config.max_steps):
+        if config.do_first_eval and step == start_step:
+            eval_fn_ppl(model, eval_device_loader)
         if config.do_first_eval and step == start_step:
             eval_fn(model, ref_model, eval_device_loader, config, step)
         loss, metrics = train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step, tokenizer)
