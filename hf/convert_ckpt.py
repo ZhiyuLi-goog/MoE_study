@@ -83,12 +83,12 @@ def main(config: DictConfig):
     if config.model.name_or_path == "mistralai/Mixtral-8x22B-v0.1":
         # sentencepiece mismatch in a recent commit https://huggingface.co/mistralai/Mixtral-8x22B-v0.1/discussions/9
         # https://huggingface.co/mistralai/Mixtral-8x22B-v0.1/discussions/10
-        tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path, revision="refs/pr/10")
+        tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path, revision="refs/pr/10", padding_side="right")
     else:
         tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
     if not tokenizer.pad_token:
         tokenizer.pad_token = tokenizer.decode([0])
-    batch = tokenizer(example_dataset, padding='max_length', return_tensors="pt").to(xm.xla_device())
+    batch = tokenizer(example_dataset, padding='max_length', return_tensors="pt", max_length=256).to(xm.xla_device())
     batch["input_ids"] = torch.where(batch["input_ids"] > 0, batch["input_ids"], -100)
     loss = model(
         batch["input_ids"],
