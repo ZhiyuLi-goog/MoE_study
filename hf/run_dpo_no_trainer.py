@@ -457,30 +457,6 @@ def eval_fn(model, ref_model, eval_device_loader, config, step):
     xm.add_step_closure(
         report_eval_metrics, args=(step, avg_losses, group_eval_metrics))
 
-def strip_padding(tokens_list, padding_token_id):
-    """
-    Strips padding tokens from the beginning and end of each sequence in a list.
-
-    Args:
-    tokens_list (list of list of int): List containing sequences of token IDs.
-    padding_token_id (int): The token ID used for padding.
-
-    Returns:
-    list of list of int: The list of sequences with padding tokens removed.
-    """
-    def strip_single_sequence(sequence):
-        # Remove padding tokens from the start
-        start = 0
-        while start < len(sequence) and sequence[start] == padding_token_id:
-            start += 1
-        # Remove padding tokens from the end
-        end = len(sequence)
-        while end > start and sequence[end - 1] == padding_token_id:
-            end -= 1
-        return sequence[start:end]
-    
-    return [strip_single_sequence(seq) for seq in tokens_list]
-
 
 def train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step, tokenizer):
     batch = next(train_device_loader)
