@@ -92,8 +92,10 @@ def main(config: DictConfig):
         tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path, revision="refs/pr/10", padding_side="right")
     else:
         tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
-    if not tokenizer.pad_token:
-        tokenizer.pad_token = tokenizer.decode([0])
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    if tokenizer.chat_template is None:
+        tokenizer.chat_template = "{% for message in messages %}{{message['role'] + ': ' + message['content'] + '\n\n'}}{% endfor %}{{ eos_token }}"
     batch = tokenizer(example_dataset, padding='max_length', return_tensors="pt", max_length=256).to(xm.xla_device())
     batch["input_ids"] = torch.where(batch["input_ids"] > 0, batch["input_ids"], -100)
     loss = model(
@@ -103,6 +105,8 @@ def main(config: DictConfig):
         ).loss
     print(f"{batch=}")
     print(f"ppl: {torch.exp(loss)}")
+    for k, v in model.state_dict().items():
+        logger.info(f"{k}: {v.dtype} {v.mean()}")
     train_device_loader, eval_device_loader = get_data_device_iterator(config, tokenizer, mesh)
     batch = next(eval_device_loader)
     print(f"{batch=}")
