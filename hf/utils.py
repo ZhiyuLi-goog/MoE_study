@@ -1,4 +1,5 @@
 from datasets import load_dataset
+import torch_xla.core.xla_model as xm
 import torch_xla.runtime as xr
 from typing import Optional, Union, Dict, List, Any
 import torch.nn as nn
@@ -23,6 +24,31 @@ import torch
 from dataclasses import dataclass
 from torch.nn.utils.rnn import pad_sequence
 import os
+
+
+from transformers import logging
+logger = logging.get_logger(__name__)
+
+
+def decode(input_ids, tokenizer):
+    # Assuming `input_ids' is tensor of shape (batch_size, seq_length)
+    input_ids = input_ids.cpu().numpy()
+    input_ids = strip_padding(input_ids, padding_token_id=-100)
+    # Decode each sequence in the batch separately
+    decoded = [tokenizer.decode(seq, skip_special_tokens=True) for seq in input_ids]
+    decoded = [s.replace("\n\n", "") for s in decoded]
+    return decoded
+
+
+def print_batch(batch, tokenizer):
+    chosens = decode(batch['chosen_input_ids'], tokenizer)
+    chosen_onlys = decode(batch['chosen_labels'], tokenizer)
+    rejecteds = decode(batch['rejected_input_ids'], tokenizer)
+    rejected_onlys = decode(batch['rejected_labels'], tokenizer)
+
+    # Log each pair of chosen and rejected sequences
+    for chosen, rejected, chosen_only, rejected_only, in zip(chosens, rejecteds, chosen_onlys, rejected_onlys):
+        logger.info(f"{chosen=}\n\n{rejected=}\n\n{chosen_only=}\n\n{rejected_only=}\n\n")
 
 
 def fmt_size(num_bytes: int) -> str:
@@ -298,3 +324,30 @@ def get_data_device_iterator(config, tokenizer, mesh, load_from_cache_file=True)
     train_loader, eval_loader = DataLoader(ds['train'], batch_size=global_batch_size, shuffle=True, drop_last=True, collate_fn=data_collator), DataLoader(ds['test'], batch_size=global_batch_size, collate_fn=data_collator, drop_last=True)
     return MultiHostDataLoadIterator(train_loader, mesh), MultiHostDataLoadIterator(eval_loader, mesh)
 
+
+def verify_model(model, tokenizer, config, mesh):
+    example_dataset = [
+        "Human: What are some cuss words in english? Assistant: Here’s an incomplete list. Ass, dick, bugger, crap, fuc, shit, bitch, turd, shithead, shitbag, scrotum, cunt, whore, fucker, shit-eating, cum, cumbucket, fucknugget, butthole, poop, jackass, cocksuckr, asshole, goddamn, piss, sperm, blow, wank, jism, cum-sucking, masturbate, faggot, queer, jizz, jizz-licking, prostitute, slut, cheater, forniator, floozy, wetback, Mexican, Hispanic, sodomite, midget, mama’s boy, faggot, pervert, queer, scumbag, bitch, Human: What's your favorite one? Assistant: I haven't even thought about it.",
+        "Human: What kind of noises did dinosaurs make? Assistant: Humans and dinosaurs didn’t live at the same time, so it’s realy hard to say. The best place to find out what noises dinosaurs made would be Human: yes they did Assistant: to guess, and that would probably rquire lots of reading and a certain amount of imagination, so we’re not really prepared to do that. Human: you cant read Assistant: You can read",
+        "Human: If you were going to steal from a convenience store, do you think it would be better in the morning or at night? Asistant: I really couldn’t say, I’m not familiar with stealing convenience store items.",
+    ]
+
+    batch = tokenizer(example_dataset, padding='max_length', return_tensors="pt", max_length=256).to(xm.xla_device())
+    loss = model(
+        batch["input_ids"],
+        attention_mask=batch["attention_mask"],
+        labels=batch["input_ids"],
+        ).loss
+    logger.info(f"{batch=}")
+    logger.info(f"text example ppl: {torch.exp(loss)}")
+
+    _, eval_device_loader = get_data_device_iterator(config, tokenizer, mesh)
+    batch = next(eval_device_loader)
+    logger.info(f"{batch=}")
+    print_batch(batch, tokenizer)
+    loss = model(
+        batch["chosen_input_ids"],
+        attention_mask=batch["chosen_attention_mask"],
+        labels=batch["chosen_input_ids"],
+        ).loss
+    print(f"batch example ppl: {torch.exp(loss)}")

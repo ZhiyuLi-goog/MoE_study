@@ -44,7 +44,7 @@ from datetime import datetime
 import os
 import getpass
 from transformers import set_seed
-from utils import get_synthetic_data_device_iterator, get_data_device_iterator, get_cpu_memory
+from utils import get_synthetic_data_device_iterator, get_data_device_iterator, get_cpu_memory, print_batch
 import torch_xla.debug.metrics as met
 from torch_xla.experimental.distributed_checkpoint import CheckpointManager, prime_optimizer
 
@@ -482,25 +482,6 @@ def strip_padding(tokens_list, padding_token_id):
     return [strip_single_sequence(seq) for seq in tokens_list]
 
 
-def decode(input_ids, tokenizer):
-    # Assuming `input_ids' is tensor of shape (batch_size, seq_length)
-    input_ids = input_ids.cpu().numpy()
-    input_ids = strip_padding(input_ids, padding_token_id=-100)
-    # Decode each sequence in the batch separately
-    decoded = [tokenizer.decode(seq, skip_special_tokens=True) for seq in input_ids]
-    decoded = [s.replace("\n\n", "") for s in decoded]
-    return decoded
-
-def print_batch(batch, tokenizer):
-    chosens = decode(batch['chosen_input_ids'], tokenizer)
-    chosen_onlys = decode(batch['chosen_labels'], tokenizer)
-    rejecteds = decode(batch['rejected_input_ids'], tokenizer)
-    rejected_onlys = decode(batch['rejected_labels'], tokenizer)
-
-    # Log each pair of chosen and rejected sequences
-    for chosen, rejected, chosen_only, rejected_only, in zip(chosens, rejecteds, chosen_onlys, rejected_onlys):
-        logger.info(f"{chosen=}\n\n{rejected=}\n\n{chosen_only=}\n\n{rejected_only=}\n\n")
-
 def train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step, tokenizer):
     batch = next(train_device_loader)
     if step == start_step:
@@ -622,8 +603,9 @@ def main(config: DictConfig):
         xm.mark_step()
         logger.info("checkpoint loaded")
     else:
-        model.apply(model._init_weights)
-        ref_model.apply(ref_model._init_weights)
+        if config.model.config_path:
+            model.apply(model._init_weights)
+            ref_model.apply(ref_model._init_weights)
 
     if config.optimizer == "ADAMW_TORCH_XLA":
         from torch_xla.amp.syncfree import AdamW
@@ -660,7 +642,6 @@ def main(config: DictConfig):
 
     if config.xla_metric_report:
         logger.info(met.metrics_report())
-    
 
 
 if __name__ == '__main__':
