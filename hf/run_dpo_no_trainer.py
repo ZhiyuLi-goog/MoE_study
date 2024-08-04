@@ -412,7 +412,7 @@ def eval_fn_ppl(model, eval_device_loader):
                 labels=eval_batch["chosen_input_ids"],
                 use_cache=False,
                 ).loss
-            total_losses.append(loss)
+            total_losses.append(loss.float())
 
     average_loss = sum(total_losses) / len(total_losses)
     average_ppl = torch.exp(average_loss)
