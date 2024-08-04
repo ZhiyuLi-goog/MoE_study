@@ -139,10 +139,21 @@ def main(config: DictConfig):
             logger.info(f"{k}: {v.dtype} {v.mean()}")
 
         ckpt_manager.save(0, state_dict)
+
     else:
         raise ValueError("need valid {config.checkpoint_manager_path=}")
-    
+
     logger.info("checkpoing saving finished.")
+    if config.checkpoint_manager_path:
+        restore_state_dict = {
+            'model': model.state_dict(),
+        }
+        ckpt_manager.restore(0, restore_state_dict)
+        model.load_state_dict(restore_state_dict['model'])
+        for k, v in model.state_dict():
+            logger.info(f"{k}: {v.dtype} {v.mean()}")
+        xm.mark_step()
+        logger.info("checkpoint loaded")
 
 
 if __name__ == '__main__':
