@@ -29,6 +29,15 @@ import os
 from transformers import logging
 logger = logging.get_logger(__name__)
 
+def compare_tensors(t1, t2, name=str, atol=1e-5, rtol=1e-5):
+    result = torch.allclose(t1, t2, atol=atol, rtol=rtol)
+    if result:
+        return True
+    else:
+        print(f"{name=} {t1.shape=}")
+        np.testing.assert_allclose(t1.cpu().numpy(), t2.cpu().numpy(), atol=atol, rtol=rtol)
+        return False
+
 
 def strip_padding(tokens_list, padding_token_id):
     """
@@ -53,6 +62,8 @@ def strip_padding(tokens_list, padding_token_id):
         return sequence[start:end]
     
     return [strip_single_sequence(seq) for seq in tokens_list]
+
+
 
 
 def decode(input_ids, tokenizer):

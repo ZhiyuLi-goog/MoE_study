@@ -29,7 +29,8 @@ from datetime import datetime
 import os
 import getpass
 from transformers import set_seed
-from utils import get_synthetic_data_device_iterator, get_data_device_iterator, get_cpu_memory, verify_model
+
+from utils import get_synthetic_data_device_iterator, get_data_device_iterator, get_cpu_memory, verify_model, compare_tensors
 import torch_xla.debug.metrics as met
 from torch_xla.experimental.distributed_checkpoint import CheckpointManager
 import jax
@@ -114,6 +115,7 @@ def main(config: DictConfig):
         logger.info("saved model.state_dict:")
         for k, v in state_dict['model'].items():
             logger.info(f"{k}: {v.dtype} {v.mean()}")
+            compare_tensors(model.state_dict()[k], v, name=k)
 
         ckpt_manager.save(0, state_dict)
     else:
