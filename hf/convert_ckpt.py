@@ -60,13 +60,19 @@ def main(config: DictConfig):
     if config.model.config_path:
         model_config = AutoConfig.from_pretrained(config.model.config_path)
         model_config.static = True
-        model_config.flash_attention = True
+        model_config.flash_attention = config.flash_attention
+        model_config.gmm = False
+        model_config.gmm_stack = False
         with torch.device("meta"):
             model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(model_torch_dtype)
         model.apply(model._init_weights)
     else:
         model = AutoModelForCausalLM.from_pretrained(
             config.model.name_or_path, cache_dir=config.cache_local_dir, torch_dtype=model_torch_dtype)
+        model.config.static = True
+        model.config.flash_attention = config.flash_attention
+        model.config.gmm = False
+        model.config.gmm_stack = False
     
     logger.info("model loaded")
     model = prepare_model(model, config)
