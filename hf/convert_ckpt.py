@@ -33,7 +33,8 @@ from utils import get_synthetic_data_device_iterator, get_data_device_iterator, 
 import torch_xla.debug.metrics as met
 from torch_xla.experimental.distributed_checkpoint import CheckpointManager
 
-from run_dpo_no_trainer import prepare_model, logger, print_batch
+from run_dpo_no_trainer import prepare_model, print_batch
+logger = logging.get_logger(__name__)
 
 @hydra.main(version_base=None, config_path="config", config_name="config")
 def main(config: DictConfig):
@@ -75,9 +76,14 @@ def main(config: DictConfig):
         model.config.gmm_stack = False
     
     logger.info("model loaded")
-    model = prepare_model(model, config)
+    logger.info("cpu:")
+    for k, v in model.state_dict().items():
+        logger.info(f"{k}: {v.dtype} {v.mean()}")
 
-    logger.info("model prepared")
+    model = prepare_model(model, config)
+    logger.info("FSDP model prepared tpu:")
+    for k, v in model.state_dict().items():
+        logger.info(f"{k}: {v.dtype} {v.mean()}")
     gc.collect()
     xm.mark_step()
 
@@ -103,13 +109,11 @@ def main(config: DictConfig):
         attention_mask=batch["attention_mask"],
         labels=batch["input_ids"],
         ).loss
-    print(f"{batch=}")
-    print(f"ppl: {torch.exp(loss)}")
-    for k, v in model.state_dict().items():
-        logger.info(f"{k}: {v.dtype} {v.mean()}")
-    train_device_loader, eval_device_loader = get_data_device_iterator(config, tokenizer, mesh)
+    logger.info(f"{batch=}")
+    logger.info(f"ppl: {torch.exp(loss)}")
+    _, eval_device_loader = get_data_device_iterator(config, tokenizer, mesh)
     batch = next(eval_device_loader)
-    print(f"{batch=}")
+    logger.info(f"{batch=}")
     print_batch(batch, tokenizer)
     loss = model(
         batch["chosen_input_ids"],
@@ -129,6 +133,7 @@ def main(config: DictConfig):
         state_dict = {
             'model': model.state_dict(),
         }
+        logger.info("saved model.state_dict:")
         for k, v in state_dict['model'].items():
             logger.info(f"{k}: {v.dtype} {v.mean()}")
 

@@ -540,7 +540,7 @@ def main(config: DictConfig):
         # sentencepiece mismatch in a recent commit https://huggingface.co/mistralai/Mixtral-8x22B-v0.1/discussions/9
         # https://huggingface.co/mistralai/Mixtral-8x22B-v0.1/discussions/10
         # tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path, revision="refs/pr/10")
-        tokenizer = AutoTokenizer.from_pretrained("mistral-community/Mixtral-8x22B-v0.1")
+        tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path, revision="refs/pr/10")
     else:
         tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
     if tokenizer.pad_token is None:

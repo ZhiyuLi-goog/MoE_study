@@ -233,6 +233,10 @@ def tokenize_row(feature, tokenizer=None, truncation_mode="keep_end", max_length
 def get_data_device_iterator(config, tokenizer, mesh, load_from_cache_file=True):
 
     ds = load_dataset(config.datasets)
+    if config.dry_run:
+        for key in ds:
+            ds[key] = ds[key].select(range(50))
+
     num_proc = config.num_proc
     if num_proc > 1:
         raise ValueError(f"{config.num_proc=}, which is bigger than 1. HuggingFace treats SPMD as a single-device program.")
