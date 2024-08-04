@@ -121,6 +121,6 @@ def main(config: DictConfig):
 
 
 if __name__ == '__main__':
-    torch_xla._XLAC._xla_set_use_full_mat_mul_precision(use_full_mat_mul_precision=True)
+    # torch_xla._XLAC._xla_set_use_full_mat_mul_precision(use_full_mat_mul_precision=True)
     jax.config.update("jax_default_matmul_precision", "highest")
     main()
