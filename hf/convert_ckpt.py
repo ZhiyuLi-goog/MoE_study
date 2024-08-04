@@ -32,6 +32,7 @@ from transformers import set_seed
 from utils import get_synthetic_data_device_iterator, get_data_device_iterator, get_cpu_memory
 import torch_xla.debug.metrics as met
 from torch_xla.experimental.distributed_checkpoint import CheckpointManager
+import jax
 
 from run_dpo_no_trainer import prepare_model, print_batch
 logger = logging.get_logger(__name__)
@@ -145,4 +146,6 @@ def main(config: DictConfig):
 
 
 if __name__ == '__main__':
+    torch_xla._XLAC._xla_set_use_full_mat_mul_precision(use_full_mat_mul_precision=True)
+    jax.config.update("jax_default_matmul_precision", "highest")
     main()
