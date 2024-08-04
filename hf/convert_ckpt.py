@@ -8,6 +8,7 @@ import wandb
 import json
 from typing import Optional, Set
 from transformers import AutoModelForCausalLM, AutoConfig, AutoTokenizer
+import copy
 
 import torch_xla.core.xla_model as xm
 import torch_xla.distributed.spmd as xs
@@ -82,10 +83,13 @@ def main(config: DictConfig):
     for k, v in model.state_dict().items():
         logger.info(f"{k}: {v.dtype} {v.mean()}")
 
+    cpu_state_dict = copy.deepcopy(model.state_dict())
+
     model = prepare_model(model, config)
     logger.info("FSDP model prepared tpu:")
     for k, v in model.state_dict().items():
         logger.info(f"{k}: {v.dtype} {v.mean()}")
+        compare_tensors(cpu_state_dict[k.replace("_orig_module.", "")], v, name=k)
     gc.collect()
     xm.mark_step()
 
@@ -115,7 +119,7 @@ def main(config: DictConfig):
         logger.info("saved model.state_dict:")
         for k, v in state_dict['model'].items():
             logger.info(f"{k}: {v.dtype} {v.mean()}")
-            compare_tensors(model.state_dict()[k], v, name=k)
+            compare_tensors(cpu_state_dict[k.replace("_orig_module.", "")], v, name=k)
 
         ckpt_manager.save(0, state_dict)
     else:

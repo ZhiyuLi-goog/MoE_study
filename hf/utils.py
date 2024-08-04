@@ -29,13 +29,13 @@ import os
 from transformers import logging
 logger = logging.get_logger(__name__)
 
-def compare_tensors(t1, t2, name=str, atol=1e-5, rtol=1e-5):
+def compare_tensors(t1, t2, name=str, atol=1e-6, rtol=1e-6):
     result = torch.allclose(t1, t2, atol=atol, rtol=rtol)
     if result:
         return True
     else:
         print(f"{name=} {t1.shape=}")
-        np.testing.assert_allclose(t1.cpu().numpy(), t2.cpu().numpy(), atol=atol, rtol=rtol)
+        np.testing.assert_allclose(t1.float().cpu().numpy(), t2.float().cpu().numpy(), atol=atol, rtol=rtol)
         return False
 
 
