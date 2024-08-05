@@ -57,7 +57,7 @@ def main(config: DictConfig):
     mesh = xs.Mesh(device_ids, mesh_shape, axis_names=("fsdp", "tensor") )
     xs.set_global_mesh(mesh)
 
-    model_torch_dtype = getattr(torch, config.model.torch_dtype)
+    policy_dtype = getattr(torch, config.model.policy_dtype)
 
     logger.info(f"cpu memory usage: {get_cpu_memory()}")
     logger.info("loading model")
@@ -68,11 +68,11 @@ def main(config: DictConfig):
         model_config.gmm = False
         model_config.gmm_stack = False
         with torch.device("meta"):
-            model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(model_torch_dtype)
+            model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(policy_dtype)
         model.apply(model._init_weights)
     else:
         model = AutoModelForCausalLM.from_pretrained(
-            config.model.name_or_path, cache_dir=config.cache_local_dir, torch_dtype=model_torch_dtype)
+            config.model.name_or_path, cache_dir=config.cache_local_dir, torch_dtype=policy_dtype)
         model.config.static = True
         model.config.flash_attention = config.flash_attention
         model.config.gmm = False
@@ -83,13 +83,10 @@ def main(config: DictConfig):
     for k, v in model.state_dict().items():
         logger.info(f"{k}: {v.dtype} {v.mean()}")
 
-    cpu_state_dict = copy.deepcopy(model.state_dict())
-
     model = prepare_model(model, config)
     logger.info("FSDP model prepared tpu:")
     for k, v in model.state_dict().items():
         logger.info(f"{k}: {v.dtype} {v.mean()}")
-        compare_tensors(cpu_state_dict[k.replace("_orig_module.", "")], v, name=k)
     gc.collect()
     xm.mark_step()
 
@@ -119,7 +116,6 @@ def main(config: DictConfig):
         logger.info("saved model.state_dict:")
         for k, v in state_dict['model'].items():
             logger.info(f"{k}: {v.dtype} {v.mean()}")
-            compare_tensors(cpu_state_dict[k.replace("_orig_module.", "")], v, name=k)
 
         ckpt_manager.save(0, state_dict)
     else:

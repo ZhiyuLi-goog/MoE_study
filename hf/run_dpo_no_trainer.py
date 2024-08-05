@@ -505,7 +505,7 @@ def main(config: DictConfig):
     if tokenizer.chat_template is None:
         tokenizer.chat_template = "{% for message in messages %}{{message['role'] + ': ' + message['content'] + '\n\n'}}{% endfor %}{{ eos_token }}"
 
-    model_torch_dtype = getattr(torch, config.model.torch_dtype)
+    policy_dtype = getattr(torch, config.model.policy_dtype)
 
     logger.info(f"cpu memory usage: {get_cpu_memory()}")
     logger.info("loading model")
@@ -516,10 +516,10 @@ def main(config: DictConfig):
         model_config.gmm = False
         model_config.gmm_stack = False
         with torch.device("meta"):
-            model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(model_torch_dtype)
+            model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(policy_dtype)
     else:
         model = AutoModelForCausalLM.from_pretrained(
-            config.model.name_or_path, cache_dir=config.cache_local_dir, low_cpu_mem_usage=True, torch_dtype=model_torch_dtype)
+            config.model.name_or_path, cache_dir=config.cache_local_dir, low_cpu_mem_usage=True, torch_dtype=policy_dtype)
     
     if tokenizer.vocab_size != model.config.vocab_size:
         logger.warning(
@@ -534,13 +534,14 @@ def main(config: DictConfig):
     xm.mark_step()
     logger.info(f"cpu memory usage: {get_cpu_memory()}")
 
+    reference_dtype = getattr(torch, config.model.reference_dtype)
     logger.info("loading ref_model")
     if config.model.config_path:
         with torch.device("meta"):
-            ref_model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(model_torch_dtype)
+            ref_model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(reference_dtype)
     else:
         ref_model = AutoModelForCausalLM.from_pretrained(
-            config.model.name_or_path, cache_dir=config.cache_local_dir, low_cpu_mem_usage=True, torch_dtype=model_torch_dtype)
+            config.model.name_or_path, cache_dir=config.cache_local_dir, low_cpu_mem_usage=True, torch_dtype=reference_dtype)
     logger.info("ref_model loaded")
     ref_model.eval()
     ref_model = prepare_model(ref_model, config)
