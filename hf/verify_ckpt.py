@@ -117,6 +117,7 @@ def main(config: DictConfig):
         tokenizer.chat_template = "{% for message in messages %}{{message['role'] + ': ' + message['content'] + '\n\n'}}{% endfor %}{{ eos_token }}"
 
     verify_model(model, tokenizer, config, mesh)
+    verify_model(ckpt_model, tokenizer, config, mesh)
 
 
 if __name__ == '__main__':
