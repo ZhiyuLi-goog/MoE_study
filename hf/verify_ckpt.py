@@ -118,6 +118,8 @@ def main(config: DictConfig):
 
     verify_model(model, tokenizer, config, mesh)
     verify_model(ckpt_model, tokenizer, config, mesh)
+    print(f"{model.config=}")
+    print(f"{ckpt_model.config=}")
 
 
 if __name__ == '__main__':
