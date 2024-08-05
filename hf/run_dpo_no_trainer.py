@@ -204,12 +204,12 @@ def forward(
         batch["chosen_input_ids"],
         attention_mask=batch["chosen_attention_mask"],
         use_cache=False,
-    ).logits
+    ).logits.to(torch.float32)
     rejected_logits = model(
         batch["rejected_input_ids"],
         attention_mask=batch["rejected_attention_mask"],
         use_cache=False,
-    ).logits
+    ).logits.to(torch.float32)
     chosen_labels = batch["chosen_labels"].clone()
     rejected_labels = batch["rejected_labels"].clone()
 
@@ -239,7 +239,7 @@ def concatenated_forward(
         concatenated_batch["concatenated_input_ids"],
         attention_mask=concatenated_batch["concatenated_attention_mask"],
         use_cache=False,
-    ).logits
+    ).logits.to(torch.float32)
 
     all_logps, size_completion = get_batch_logps(
         all_logits,
