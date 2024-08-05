@@ -601,6 +601,7 @@ def main(config: DictConfig):
     tracker = xm.RateTracker()
 
     logger.info(f"cpu memory usage: {get_cpu_memory()}")
+    step = start_step
     for step in np.arange(start_step, config.max_steps):
         if config.do_first_eval and step == start_step:
             eval_fn_ppl(model, eval_device_loader)
@@ -621,6 +622,7 @@ def main(config: DictConfig):
             import tempfile
             xp.trace_detached('127.0.0.1:9012', config.get("profile_logdir", tempfile.mkdtemp()), config.get("profile_duration", 20000))
 
+    eval_fn(model, ref_model, eval_device_loader, config, step)
     if config.xla_metric_report:
         logger.info(met.metrics_report())
 
