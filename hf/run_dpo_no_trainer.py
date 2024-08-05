@@ -604,7 +604,10 @@ def main(config: DictConfig):
             eval_fn_ppl(model, eval_device_loader)
         if config.do_first_eval and step == start_step:
             eval_fn(model, ref_model, eval_device_loader, config, step)
-        loss, metrics = train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step, tokenizer)
+        try:
+            loss, metrics = train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step, tokenizer)
+        except StopIteration:
+            break
         if step >= start_step and step % config.report_metrics_freq == 0:
             xm.add_step_closure(
                 report_metrics, args=(step, loss, tracker, metrics))
