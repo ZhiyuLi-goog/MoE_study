@@ -62,7 +62,7 @@ lr: 5e-7
 # number of steps to accumulate over for each batch
 #   (e.g. if batch_size=4 and gradient_accumulation_steps=2, then we will
 #   accumulate gradients over 2 microbatches of size 2)
-gradient_accumulation_steps: 1
+# gradient_accumulation_steps: 1
 
 # the maximum allowed length for an input (prompt + response)
 max_length: 512
