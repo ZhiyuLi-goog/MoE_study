@@ -118,8 +118,14 @@ def main(config: DictConfig):
 
     verify_model(model, tokenizer, config, mesh)
     verify_model(ckpt_model, tokenizer, config, mesh)
+
     print(f"{model.config=}")
     print(f"{ckpt_model.config=}")
+
+    logger.info("ckpt_model:")
+    for k, v in ckpt_model.state_dict().items():
+        logger.info(f"{k}: {v.dtype} {v.mean()}")
+        compare_tensors(model.state_dict()[k], v, name=k)
 
 
 if __name__ == '__main__':
