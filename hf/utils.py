@@ -162,7 +162,7 @@ class DPODataCollatorWithPadding:
             if k.endswith(("_input_ids", "_attention_mask", "_labels", "_pixel_values")):
                 to_pad = [torch.LongTensor(ex[k]) for ex in features]
 
-                if (k.startswith("prompt")) and (k.endswith("input_ids")):
+                if k.endswith("input_ids"):
                     if self.pad_token_id is None:
                         raise ValueError(
                             "Padding is enabled, but the tokenizer is not configured with a padding token."
