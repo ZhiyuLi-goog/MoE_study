@@ -219,10 +219,14 @@ def get_synthetic_data_device_iterator(config, tokenizer, mesh):
 def extract_anthropic_prompt(chosen, rejected):
     """Extract the anthropic prompt from a prompt and response pair."""
     search_term = "\n\nAssistant:"
-    common_prefix = os.path.commonprefix([chosen, rejected])
-    search_term_idx = common_prefix.rfind(search_term)
+    # common_prefix = os.path.commonprefix([chosen, rejected])
+    # search_term_idx = common_prefix.rfind(search_term)
+    # assert search_term_idx != -1, f"Prompt and response does not contain '{search_term}'"
+    # return chosen[: search_term_idx + len(search_term)]
+    search_term_idx = chosen.rfind(search_term)
     assert search_term_idx != -1, f"Prompt and response does not contain '{search_term}'"
     return chosen[: search_term_idx + len(search_term)]
+    
 
 
 def tokenize_row(feature, tokenizer=None, truncation_mode="keep_end", max_length=512, max_prompt_length=256, label_pad_token_id=-100) -> Dict:
@@ -247,11 +251,12 @@ def tokenize_row(feature, tokenizer=None, truncation_mode="keep_end", max_length
 
     # add EOS token to end of answer. Avoid adding if it's already there
     eos_token_id = tokenizer.eos_token_id
-    if eos_token_id != chosen_tokens["input_ids"][-1]:
-        chosen_tokens["input_ids"].append(eos_token_id)
-    if eos_token_id != rejected_tokens["input_ids"][-1]:
-        rejected_tokens["input_ids"].append(eos_token_id)
-        rejected_tokens["attention_mask"].append(1)
+    # if eos_token_id != chosen_tokens["input_ids"][-1]:
+    chosen_tokens["input_ids"].append(eos_token_id)
+    chosen_tokens['attention_mask'].append(1)
+    # if eos_token_id != rejected_tokens["input_ids"][-1]:
+    rejected_tokens["input_ids"].append(eos_token_id)
+    rejected_tokens["attention_mask"].append(1)
     longer_response_length = max(len(chosen_tokens['input_ids']), len(rejected_tokens['input_ids']))
 
     # if combined sequence is too long, truncate the prompt
