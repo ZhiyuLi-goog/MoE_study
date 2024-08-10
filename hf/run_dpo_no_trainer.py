@@ -317,6 +317,7 @@ def get_batch_loss_metrics(
     reward_accuracies = (chosen_rewards > rejected_rewards).float()
 
     prefix = "eval_" if train_eval == "eval" else ""
+    num_samples = batch["chosen_input_ids"].shape[0]
     # TODO
     # mute metrics now since it trigger recompile in pytorch xla
     metrics[f"{prefix}rewards/chosen"] = chosen_rewards.sum()
@@ -328,8 +329,8 @@ def get_batch_loss_metrics(
     metrics[f"{prefix}logits/rejected"] = policy_rejected_logits.detach().sum()
     metrics[f"{prefix}logits/chosen"] = policy_chosen_logits.detach().sum()
     metrics[f"{prefix}losses"] = losses.detach().sum()
-    metrics[f"{prefix}num_samples"] = batch["chosen_input_ids"].shape[0]
-    metrics[f"{prefix}ppl"] = torch.exp(policy_chosen_logps_avg.detach())
+    metrics[f"{prefix}num_samples"] = num_samples
+    metrics[f"{prefix}ppl"] = torch.exp(policy_chosen_logps_avg.detach()) * num_samples
 
     return losses.mean(), metrics
 
