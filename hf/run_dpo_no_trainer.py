@@ -603,7 +603,7 @@ def main(config: DictConfig):
     for step in np.arange(start_step, config.max_steps):
         if config.do_first_eval and step == start_step:
             eval_fn_ppl(model, eval_device_loader)
-        if config.do_first_eval or step > start_step and step % config.eval_frequency == 0:
+        if step == start_step and config.do_first_eval or step > start_step and step % config.eval_frequency == 0:
             eval_fn(model, ref_model, eval_device_loader, config, step)
         try:
             loss, metrics = train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step, tokenizer)
