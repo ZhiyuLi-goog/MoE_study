@@ -184,11 +184,11 @@ def get_batch_logps(
         return (per_token_logps * loss_mask).sum(-1), loss_mask.sum(-1)
 
 
-def cross_entropy_loss(logits, labels):
+def cross_entropy_loss(logits, labels, pad_token_id=0):
     # Flatten the tokens
     logits = logits[..., :-1, :].contiguous()
     labels = labels[..., 1:].contiguous()
-    loss_fct = nn.CrossEntropyLoss()
+    loss_fct = nn.CrossEntropyLoss(ignore_index=pad_token_id)
     logits = logits.view(-1, logits.shape[-1])
     labels = labels.view(-1)
     # Enable model parallelism
@@ -198,7 +198,7 @@ def cross_entropy_loss(logits, labels):
 
 
 def forward(
-        model: nn.Module, batch: Dict[str, Union[List, torch.LongTensor]], label_pad_token_id: int = -100,
+        model: nn.Module, batch: Dict[str, Union[List, torch.LongTensor]], label_pad_token_id: int = -100, pad_token_id: int = 0,
     ) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
     chosen_logits = model(
         batch["chosen_input_ids"],
@@ -215,7 +215,7 @@ def forward(
 
     chosen_logps, size_completion = get_batch_logps(chosen_logits, chosen_labels, label_pad_token_id=label_pad_token_id)
     rejected_logps, size_completion = get_batch_logps(rejected_logits, rejected_labels, label_pad_token_id=label_pad_token_id)
-    nll_loss = cross_entropy_loss(chosen_logits, chosen_labels)
+    nll_loss = cross_entropy_loss(chosen_logits, chosen_labels, pad_token_id)
     return (chosen_logps, rejected_logps, chosen_logits, rejected_logits, nll_loss)
 
 def create_concatenated_batch(batch: Dict[str, Union[List, torch.LongTensor]]):
@@ -227,7 +227,7 @@ def create_concatenated_batch(batch: Dict[str, Union[List, torch.LongTensor]]):
     return concatenated_batch
 
 def concatenated_forward(
-        model: nn.Module, batch: Dict[str, Union[List, torch.LongTensor]], label_pad_token_id: int = -100,
+        model: nn.Module, batch: Dict[str, Union[List, torch.LongTensor]], label_pad_token_id: int = -100, pad_token_id: int = 0,
     ) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
     """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
 
@@ -248,7 +248,7 @@ def concatenated_forward(
     )
 
     labels = concatenated_batch["concatenated_labels"].clone()
-    nll_loss = cross_entropy_loss(all_logits[:len_chosen], batch["chosen_input_ids"])
+    nll_loss = cross_entropy_loss(all_logits[:len_chosen], batch["chosen_input_ids"], pad_token_id)
 
     chosen_logps = all_logps[:len_chosen]
     rejected_logps = all_logps[len_chosen:]
@@ -265,6 +265,7 @@ def get_batch_loss_metrics(
         batch: Dict[str, Union[List, torch.LongTensor]],
         train_eval: Literal["train", "eval"] = "train",
         label_pad_token_id: int = -100,
+        pad_token_id: int = 0,
         beta: float = 0.1,
         config: DictConfig = None,
     ):
@@ -278,7 +279,7 @@ def get_batch_loss_metrics(
             policy_chosen_logits,
             policy_rejected_logits,
             policy_chosen_logps_avg,
-        ) = concatenated_forward(model, batch, label_pad_token_id)
+        ) = concatenated_forward(model, batch, label_pad_token_id, pad_token_id)
     else:
         (
             policy_chosen_logps,
@@ -286,7 +287,7 @@ def get_batch_loss_metrics(
             policy_chosen_logits,
             policy_rejected_logits,
             policy_chosen_logps_avg,
-        ) = forward(model, batch, label_pad_token_id)
+        ) = forward(model, batch, label_pad_token_id, pad_token_id)
 
     with torch.no_grad():
         if config.concatenated_forward:
@@ -296,7 +297,7 @@ def get_batch_loss_metrics(
                 _,
                 _,
                 _,
-            ) = concatenated_forward(ref_model, batch, label_pad_token_id)
+            ) = concatenated_forward(ref_model, batch, label_pad_token_id, pad_token_id)
         else:
             (
                 reference_chosen_logps,
@@ -304,7 +305,7 @@ def get_batch_loss_metrics(
                 _,
                 _,
                 _,
-            ) = forward(ref_model, batch, label_pad_token_id)
+            ) = forward(ref_model, batch, label_pad_token_id, pad_token_id)
 
     losses, chosen_rewards, rejected_rewards = dpo_loss(
         policy_chosen_logps,
@@ -318,15 +319,15 @@ def get_batch_loss_metrics(
     prefix = "eval_" if train_eval == "eval" else ""
     # TODO
     # mute metrics now since it trigger recompile in pytorch xla
-    metrics[f"{prefix}rewards/chosen"] = chosen_rewards.mean()
-    metrics[f"{prefix}rewards/rejected"] = rejected_rewards.mean()
-    metrics[f"{prefix}rewards/accuracies"] = reward_accuracies.mean()
-    metrics[f"{prefix}rewards/margins"] = (chosen_rewards - rejected_rewards).mean()
-    metrics[f"{prefix}logps/rejected"] = policy_rejected_logps.detach().mean()
-    metrics[f"{prefix}logps/chosen"] = policy_chosen_logps.detach().mean()
-    metrics[f"{prefix}logits/rejected"] = policy_rejected_logits.detach().mean()
-    metrics[f"{prefix}logits/chosen"] = policy_chosen_logits.detach().mean()
-    metrics[f"{prefix}total_losses"] = losses.detach().sum()
+    metrics[f"{prefix}rewards/chosen"] = chosen_rewards.sum()
+    metrics[f"{prefix}rewards/rejected"] = rejected_rewards.sum()
+    metrics[f"{prefix}rewards/accuracies"] = reward_accuracies.sum()
+    metrics[f"{prefix}rewards/margins"] = (chosen_rewards - rejected_rewards).sum()
+    metrics[f"{prefix}logps/rejected"] = policy_rejected_logps.detach().sum()
+    metrics[f"{prefix}logps/chosen"] = policy_chosen_logps.detach().sum()
+    metrics[f"{prefix}logits/rejected"] = policy_rejected_logits.detach().sum()
+    metrics[f"{prefix}logits/chosen"] = policy_chosen_logits.detach().sum()
+    metrics[f"{prefix}losses"] = losses.detach().sum()
     metrics[f"{prefix}num_samples"] = batch["chosen_input_ids"].shape[0]
     metrics[f"{prefix}ppl"] = torch.exp(policy_chosen_logps_avg.detach())
 
@@ -430,13 +431,11 @@ def eval_fn(model, ref_model, eval_device_loader, config, step):
         f"{prefix}logps/chosen": [],
         f"{prefix}logits/rejected": [],
         f"{prefix}logits/chosen": [],
-        f"{prefix}total_losses": [],
+        f"{prefix}losses": [],
         f"{prefix}num_samples": [],
         f"{prefix}ppl": [],
     }
 
-    total_losses = []
-    total_weights = 0.
     for eval_batch in eval_device_loader:
         model.eval()
         with torch.no_grad():
@@ -444,18 +443,15 @@ def eval_fn(model, ref_model, eval_device_loader, config, step):
         for k in group_eval_metrics:
             group_eval_metrics[k].append(eval_metrics[k])
 
-        total_losses.append(eval_metrics["eval_total_losses"])
-        total_weights += eval_metrics["eval_num_samples"]
+    for k, v in group_eval_metrics.items():
+        group_eval_metrics[k] = sum(v)
 
     for k, v in group_eval_metrics.items():
-        if k in (f"{prefix}num_samples", f"{prefix}total_losses"):
-            group_eval_metrics[k] = sum(v)
-        else:
-            group_eval_metrics[k] = sum(v) / len(v)
+        if k not in (f"{prefix}num_samples"):
+            group_eval_metrics[k] /= group_eval_metrics[f'{prefix}num_samples']
 
-    avg_losses =  group_eval_metrics[f"{prefix}total_losses"] / group_eval_metrics[f"{prefix}num_samples"]
     xm.add_step_closure(
-        report_eval_metrics, args=(step, avg_losses, group_eval_metrics))
+        report_eval_metrics, args=(step, group_eval_metrics[f"{prefix}losses"], group_eval_metrics))
 
 
 def train_step(model, ref_model, train_device_loader, config, step, tracker, optimizer, global_batch_size, scheduler, start_step, tokenizer):
@@ -502,7 +498,7 @@ def main(config: DictConfig):
     else:
         tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
     if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.pad_token = tokenizer.unk_token
     if tokenizer.chat_template is None:
         tokenizer.chat_template = "{% for message in messages %}{{message['role'] + ': ' + message['content'] + '\n\n'}}{% endfor %}{{ eos_token }}"
 

@@ -108,3 +108,4 @@ checkpoint_manager_path: null
 flash_attention: True
 
 dry_run: False
+shuffle: True
