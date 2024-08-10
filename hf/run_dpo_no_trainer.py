@@ -58,6 +58,7 @@ import torch_xla.distributed.spmd as xs
 import torch_xla.runtime as xr
 
 import torch_xla.debug.profiler as xp
+import jax
 server = xp.start_server(9012)
 print(f'Profiling server started: {str(server)}')
 
@@ -624,4 +625,6 @@ def main(config: DictConfig):
 
 
 if __name__ == '__main__':
+    torch_xla._XLAC._xla_set_use_full_mat_mul_precision(use_full_mat_mul_precision=True)
+    jax.config.update("jax_default_matmul_precision", "highest")
     main()
