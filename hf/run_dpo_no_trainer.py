@@ -450,6 +450,10 @@ def eval_fn(model, ref_model, eval_device_loader, config, step):
         if k not in (f"{prefix}num_samples"):
             group_eval_metrics[k] /= group_eval_metrics[f'{prefix}num_samples']
 
+    num_devices = xr.global_runtime_device_count()
+    global_batch_size = int(config.per_device_train_batch_size * num_devices)
+    group_eval_metrics['trained_examples'] = step * global_batch_size
+
     xm.add_step_closure(
         report_eval_metrics, args=(step, group_eval_metrics[f"{prefix}losses"], group_eval_metrics))
 
