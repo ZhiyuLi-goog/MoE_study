@@ -501,8 +501,6 @@ def main(config: DictConfig):
         tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path, revision="refs/pr/10")
     else:
         tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.unk_token
     if tokenizer.chat_template is None:
         tokenizer.chat_template = "{% for message in messages %}{{message['role'] + ': ' + message['content'] + '\n\n'}}{% endfor %}{{ eos_token }}"
 

@@ -225,7 +225,7 @@ def extract_anthropic_prompt(chosen, rejected):
     return chosen[: search_term_idx + len(search_term)]
 
 
-def tokenize_row(feature, tokenizer=None, truncation_mode="keep_end", max_length=512, max_prompt_length=256) -> Dict:
+def tokenize_row(feature, tokenizer=None, truncation_mode="keep_end", max_length=512, max_prompt_length=256, label_pad_token_id=-100) -> Dict:
     """Tokenize a single row from a DPO specific dataset.
 
     At this stage, we don't convert to PyTorch tensors yet; we just handle the truncation
@@ -236,7 +236,6 @@ def tokenize_row(feature, tokenizer=None, truncation_mode="keep_end", max_length
         the sum of the length of the prompt and the chosen/rejected response, with
         label_pad_token_id  for the prompt tokens.
     """
-    label_pad_token_id = -100
     batch = {}
     chosen = feature["chosen"]
     rejected = feature["rejected"]
@@ -332,28 +331,13 @@ def get_data_device_iterator(config, tokenizer, mesh, load_from_cache_file=True)
         desc="split_prompt_and_responses",
     )
 
-    ds = ds.map(partial(tokenize_row, tokenizer=tokenizer, max_prompt_length=config.max_prompt_length, max_length=config.max_length), num_proc=num_proc, load_from_cache_file=load_from_cache_file, desc="tokenize_row")
+    ds = ds.map(partial(tokenize_row, tokenizer=tokenizer, max_prompt_length=config.max_prompt_length, max_length=config.max_length, label_pad_token_id=config.label_pad_token_id), num_proc=num_proc, load_from_cache_file=load_from_cache_file, desc="tokenize_row")
 
     ds = ds.select_columns(
         ['chosen_input_ids', 'chosen_attention_mask', 'chosen_labels', 'rejected_input_ids', 'rejected_attention_mask', 'rejected_labels']
     )
 
-    # def pad_sequence(row, max_length: int = None, pad_token_id: int = 0, label_pad_token_id: int = -100):
-    #     if not max_length:
-    #         max_length = max([len(v) for _, v in row.items()])
-    #     for k in row.keys():
-    #         if k.endswith("input_ids"):
-    #             padding_value = pad_token_id
-    #         elif k.endswith("_attention_mask"):
-    #             padding_value = 0
-    #         elif k.startswith(("chosen", "rejected")):
-    #             padding_value = label_pad_token_id
-    #         row[k] += [padding_value] * (max_length - len(row[k]))
-    #     return row
-    
-    # ds = ds.map(partial(pad_sequence, max_length=config.max_length), num_proc=num_proc, load_from_cache_file=load_from_cache_file, desc="pad_sequence")
-
-    data_collator = DPODataCollatorWithPadding(max_length=config.max_length)
+    data_collator = DPODataCollatorWithPadding(max_length=config.max_length, label_pad_token_id=config.label_pad_token_id, pad_token_id=config.pad_token_id)
 
     num_devices = xr.global_runtime_device_count()
     global_batch_size = int(config.per_device_train_batch_size * num_devices)
