@@ -516,8 +516,7 @@ def main(config: DictConfig):
         model_config.flash_attention = config.flash_attention
         model_config.gmm = False
         model_config.gmm_stack = False
-        with torch.device("meta"):
-            model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(policy_dtype)
+        model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(policy_dtype)
     else:
         model = AutoModelForCausalLM.from_pretrained(
             config.model.name_or_path, cache_dir=config.cache_local_dir, low_cpu_mem_usage=True, torch_dtype=policy_dtype)
@@ -538,8 +537,7 @@ def main(config: DictConfig):
     reference_dtype = getattr(torch, config.model.reference_dtype)
     logger.info("loading ref_model")
     if config.model.config_path:
-        with torch.device("meta"):
-            ref_model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(reference_dtype)
+        ref_model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(reference_dtype)
     else:
         ref_model = AutoModelForCausalLM.from_pretrained(
             config.model.name_or_path, cache_dir=config.cache_local_dir, low_cpu_mem_usage=True, torch_dtype=reference_dtype)
@@ -625,6 +623,6 @@ def main(config: DictConfig):
 
 
 if __name__ == '__main__':
-    torch_xla._XLAC._xla_set_use_full_mat_mul_precision(use_full_mat_mul_precision=True)
-    jax.config.update("jax_default_matmul_precision", "highest")
+    # torch_xla._XLAC._xla_set_use_full_mat_mul_precision(use_full_mat_mul_precision=True)
+    # jax.config.update("jax_default_matmul_precision", "highest")
     main()
