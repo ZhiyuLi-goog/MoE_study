@@ -64,8 +64,8 @@ def main(config: DictConfig):
     ckpt_model_config.flash_attention = config.flash_attention
     ckpt_model_config.gmm = False
     ckpt_model_config.gmm_stack = False
-    with torch.device("meta"):
-        ckpt_model = AutoModelForCausalLM.from_config(ckpt_model_config).to_empty(device=xm.xla_device()).to(policy_dtype)
+    # with torch.device("meta"):
+    ckpt_model = AutoModelForCausalLM.from_config(ckpt_model_config).to_empty(device=xm.xla_device()).to(policy_dtype)
 
     ckpt_model = prepare_model(ckpt_model, config)
     assert config.checkpoint_manager_path
