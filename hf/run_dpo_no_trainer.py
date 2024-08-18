@@ -521,6 +521,11 @@ def main(config: DictConfig):
     else:
         model = AutoModelForCausalLM.from_pretrained(
             config.model.name_or_path, cache_dir=config.cache_local_dir, low_cpu_mem_usage=True, torch_dtype=policy_dtype)
+
+    if model.config.architectures == ["MixtralForCausalLM"]:
+        for layer in model.model.layers:
+            layer.self_attn.rotary_emb._set_buffer(device=xm.xla_device())
+    
     
     if tokenizer.vocab_size != model.config.vocab_size:
         logger.warning(
@@ -543,6 +548,10 @@ def main(config: DictConfig):
     else:
         ref_model = AutoModelForCausalLM.from_pretrained(
             config.model.name_or_path, cache_dir=config.cache_local_dir, low_cpu_mem_usage=True, torch_dtype=reference_dtype)
+
+    if ref_model.config.architectures == ["MixtralForCausalLM"]:
+        for layer in ref_model.model.layers:
+            layer.self_attn.rotary_emb._set_buffer(device=xm.xla_device())
     logger.info("ref_model loaded")
     ref_model.eval()
     ref_model = prepare_model(ref_model, config)
