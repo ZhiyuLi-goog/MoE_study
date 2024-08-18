@@ -482,6 +482,10 @@ def train_step(model, ref_model, train_device_loader, config, step, tracker, opt
 def main(config: DictConfig):
     OmegaConf.resolve(config)
     set_seed(config.seed)
+    if config.full_precision:
+        assert config.model.policy_dtype == "float32" and config.model.reference_dtype == "float32", "both dtype of policy and reference need to be float32"
+        torch_xla._XLAC._xla_set_use_full_mat_mul_precision(use_full_mat_mul_precision=True)
+        jax.config.update("jax_default_matmul_precision", "highest")
 
     logger.info("\n\n************** Experiment configuration ***********")
     logger.info(OmegaConf.to_yaml(config))
@@ -634,6 +638,4 @@ def main(config: DictConfig):
 
 
 if __name__ == '__main__':
-    torch_xla._XLAC._xla_set_use_full_mat_mul_precision(use_full_mat_mul_precision=True)
-    jax.config.update("jax_default_matmul_precision", "highest")
     main()
