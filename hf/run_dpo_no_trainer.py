@@ -331,7 +331,7 @@ def get_batch_loss_metrics(
     metrics[f"{prefix}logits/chosen"] = policy_chosen_logits.detach().sum()
     metrics[f"{prefix}losses"] = losses.detach().sum()
     metrics[f"{prefix}num_samples"] = num_samples
-    metrics[f"{prefix}ppl"] = torch.exp(policy_chosen_logps_avg.detach()) * num_samples
+    metrics[f"{prefix}ppl"] = torch.exp(policy_chosen_logps_avg.detach())
 
     return losses.mean(), metrics
 
@@ -446,10 +446,14 @@ def eval_fn(model, ref_model, eval_device_loader, config, step):
             group_eval_metrics[k].append(eval_metrics[k])
 
     for k, v in group_eval_metrics.items():
-        group_eval_metrics[k] = sum(v)
+        # ppl is per token metrics which was averged
+        if k == f"{prefix}ppl":
+            group_eval_metrics[k] = sum(v) / len(v)
+        else:
+            group_eval_metrics[k] = sum(v)
 
     for k, v in group_eval_metrics.items():
-        if k not in (f"{prefix}num_samples"):
+        if k not in (f"{prefix}num_samples", f"{prefix}ppl"):
             group_eval_metrics[k] /= group_eval_metrics[f'{prefix}num_samples']
 
     num_devices = xr.global_runtime_device_count()
