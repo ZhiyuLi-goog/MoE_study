@@ -1,0 +1,91 @@
+defaults:
+- _self_
+- model: blank_model
+
+# name for this experiment in the local run directory and on wandb
+exp_name: moe_trial
+
+config_path: null
+
+# random seed for batch sampling
+seed: 0
+
+# the batch size for training; for FSDP, the batch size per GPU is batch_size / (grad_accumulation_steps * num_gpus)
+per_device_train_batch_size: 1
+
+# the batch size during evaluation and sampling, if enabled
+per_device_eval_batch_size: 16
+
+max_grad_norm: 0.
+
+torch_dtype: bfloat16
+max_steps: 10
+use_synthetic_data: true
+report_metrics_freq: 3
+
+use_cache: true
+cache_local_dir: null
+
+label_pad_token_id: -100
+pad_token_id: -100
+
+# which dataset(s) to train on; can pass a list like datasets=[hh,shp]
+datasets: trl-internal-testing/hh-rlhf-helpful-base-trl-style
+
+beta: 0.1
+# wandb configuration
+wandb:
+  enabled: true
+  entity: null
+  project: "direct-preference-optimization"
+
+# to create the local run directory and cache models/datasets,
+#   we will try each of these directories in order; if none exist,
+#   we will create the last one and use it
+local_dir: /tmp
+
+# whether to eval at the very beginning of training
+do_first_eval: false
+
+# an OmegaConf resolver that returns the local run directory, calling a function in utils.py
+local_run_dir: ${get_local_run_dir:${exp_name},${local_dir}}
+
+# the learning rate
+lr: 5e-7
+
+# number of steps to accumulate over for each batch
+#   (e.g. if batch_size=4 and gradient_accumulation_steps=2, then we will
+#   accumulate gradients over 2 microbatches of size 2)
+# gradient_accumulation_steps: 1
+
+# the maximum allowed length for an input (prompt + response)
+max_length: 512
+
+# the maximum allowed length for a prompt
+max_prompt_length: 256
+
+# The optimizer to use; we use RMSprop because it works about as well as Adam and is more memory-efficient
+optimizer: ADAMW_TORCH_XLA
+
+# number of linear warmup steps for the learning rate
+warmup_steps: 150
+
+# whether or not to use activation/gradient checkpointing
+activation_checkpointing: false
+
+# evaluate and save model every eval_every steps
+eval_frequency: 3
+
+# num of process in data processing
+num_proc: 1
+xla_metric_report: False
+concatenated_forward: True
+profile_logdir: null
+profile_step: null
+
+checkpoint_manager_path: null
+flash_attention: True
+
+dry_run: False
+shuffle: True
+full_precision: False
