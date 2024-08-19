@@ -525,7 +525,7 @@ def main(config: DictConfig):
         model_config.gmm = False
         model_config.gmm_stack = False
         with torch.device("meta"):
-            model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(policy_dtype)
+            model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(torch.bfloat16)
     else:
         model = AutoModelForCausalLM.from_pretrained(
             config.model.name_or_path, cache_dir=config.cache_local_dir, low_cpu_mem_usage=True, torch_dtype=policy_dtype)
@@ -542,6 +542,7 @@ def main(config: DictConfig):
 
     logger.info("model loaded")
     model = prepare_model(model, config)
+    model = model.to(policy_dtype)
     logger.info("model prepared")
 
     gc.collect()
@@ -552,7 +553,7 @@ def main(config: DictConfig):
     logger.info("loading ref_model")
     if config.model.config_path:
         with torch.device("meta"):
-            ref_model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(reference_dtype)
+            ref_model = AutoModelForCausalLM.from_config(model_config).to_empty(device=xm.xla_device()).to(torch.bfloat16)
     else:
         ref_model = AutoModelForCausalLM.from_pretrained(
             config.model.name_or_path, cache_dir=config.cache_local_dir, low_cpu_mem_usage=True, torch_dtype=reference_dtype)
@@ -563,6 +564,7 @@ def main(config: DictConfig):
     logger.info("ref_model loaded")
     ref_model.eval()
     ref_model = prepare_model(ref_model, config)
+    ref_model = ref_model.to(reference_dtype)
 
     logger.info("ref_model prepared")
     gc.collect()
