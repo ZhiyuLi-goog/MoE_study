@@ -49,26 +49,31 @@ gcloud compute tpus tpu-vm create ${TPU_NAME} --zone=${ZONE} --accelerator-type=
 
 
 ### ssh to TPU VMs and Run Workloads
-Pull docker image
+Pull docker image, say a pre-built image `gcr.io/cloud-tpu-multipod-dev/lizhiyu-pytorch-xla-moe-20240820`
 ```bash
-gcloud compute tpus tpu-vm ssh ${TPU_NAME}
+# change to a valid docker image
+export IMAGE=gcr.io/cloud-tpu-multipod-dev/lizhiyu-pytorch-xla-moe-20240820
+
+gcloud compute tpus tpu-vm ssh ${TPU_NAME} \
 --worker=all \
---command='
+--command="
 yes Y | sudo gcloud auth configure-docker
-sudo docker pull "${IMAGE}"
-'
+sudo docker pull ${IMAGE}
+"
 ```
 
 Run workloads
 ```bash
-gcloud compute tpus tpu-vm ssh ${TPU_NAME}
---worker=all \
---command='
-sudo docker run --privileged --net host --shm-size=16G --interactive -v /tmp:/tmp "${IMAGE}" bash -s <<EOF
 # login token required since 
 # the mixtral model is a restricted model 
 # that requires users e-signed agreement in place before accessing it
-huggingface-cli login --token <your_hf_token>
+export HF_TOKEN=<your_hf_token>
+
+gcloud compute tpus tpu-vm ssh ${TPU_NAME} \
+--worker=all \
+--command="
+sudo docker run --privileged --net host --shm-size=16G --interactive -v /tmp:/tmp ${IMAGE} bash -s <<EOF
+huggingface-cli login --token ${HF_TOKEN}
 
 # Setup envs
 export WANDB_MODE=offline
@@ -81,7 +86,7 @@ export XLA_HLO_DEBUG=1
 cd MoE_study/hf
 python run_dpo_no_trainer.py model.config_path=mixtral80.json max_length=4096 per_device_train_batch_size=1
 EOF
-'
+"
 ```
 
 ## Run Experiments in GKE
@@ -94,19 +99,22 @@ xpk cluster create --cluster <cluster_name> --tpu-type=<tpu_type> --num-slices=<
 
 ### Run workload in GKE
 ```
-xpk workload create \
---cluster <cluster_name> \
---base-docker-image ${IMAGE} \
---workload ${USER}-mixtral-8x7b \
---tpu-type=<tpu_type> \
---num-slices=<num_slices> \
---command='
 # login token required since 
 # the mixtral model is a restricted model 
 # that requires users e-signed agreement in place before accessing it
-huggingface-cli login --token <your_hf_token>
+export HF_TOKEN=<your_hf_token>
+
+xpk workload create \
+--cluster <cluster_name> \
+--base-docker-image ${IMAGE} \
+--workload ${USER}-run \
+--tpu-type=<tpu_type> \
+--num-slices=<num_slices> \
+--command="
+huggingface-cli login --token ${HF_TOKEN}
 
 # Setup envs
+export HYDRA_FULL_ERROR=1
 export WANDB_MODE=offline
 
 export PJRT_DEVICE=TPU
@@ -117,36 +125,18 @@ export XLA_HLO_DEBUG=1
 cd MoE_study/hf
 python run_dpo_no_trainer.py model.config_path=mixtral80.json max_length=4096 per_device_train_batch_size=1
 EOF
-'
+"
 ```
 
 ## Experiments
+To recreate the experiments, substitute the Python scripts with the following commands.
 ### Reproduce Pythia2.8b DPO experiments
-
+Best to run in v4-128 or v5p-128, and it is possible to run in v4-8 as well.
 ```bash
-python run_dpo_no_trainer.py \
-  per_device_train_batch_size=1 \
-  optimizer=RMSprop \
-  report_metrics_freq=1 \
-  use_synthetic_data=False \
-  model.name_or_path=EleutherAI/pythia-2.8b \ 
-  datasets=Anthropic/hh-rlhf max_steps=2600 eval_frequency=312 \
-  do_first_eval=True \
-  model.policy_dtype=float32 model.reference_dtype=float32 \
-  max_grad_norm=10.0 shuffle=True seed=4321 full_precision=True
+python run_dpo_no_trainer.py per_device_train_batch_size=1 optimizer=RMSprop report_metrics_freq=1 use_synthetic_data=False model.name_or_path=EleutherAI/pythia-2.8b datasets=Anthropic/hh-rlhf max_steps=2600 eval_frequency=312 do_first_eval=True model.policy_dtype=float32 model.reference_dtype=float32 max_grad_norm=10.0 shuffle=True seed=4321 full_precision=True
 ```
 
 ### Mixtral8x22b
 ```bash
-python run_dpo_no_trainer.py model.config_path=mixtral822.json \
-  per_device_train_batch_size=1 \
-  optimizer=RMSprop \ 
-  checkpoint_manager_path=gs://lizhiyu-multipods-eu-west/moe/checkpoints-20240803/mixtral822/ \
-  report_metrics_freq=1 \ 
-  use_synthetic_data=False \
-  model.name_or_path=mistralai/Mixtral-8x22B-v0.1 \
-  datasets=Anthropic/hh-rlhf max_steps=2600 eval_frequency=312 \
-  do_first_eval=True \
-  model.policy_dtype=float32 model.reference_dtype=bfloat16 \
-  max_grad_norm=10.0 seed=4321
+python run_dpo_no_trainer.py model.config_path=mixtral822.json per_device_train_batch_size=1 optimizer=RMSprop checkpoint_manager_path=gs://lizhiyu-multipods-eu-west/moe/checkpoints-20240803/mixtral822/ report_metrics_freq=1 use_synthetic_data=False model.name_or_path=mistralai/Mixtral-8x22B-v0.1 datasets=Anthropic/hh-rlhf max_steps=2600 eval_frequency=312 do_first_eval=True model.policy_dtype=float32 model.reference_dtype=bfloat16 max_grad_norm=10.0 seed=4321
 ```
