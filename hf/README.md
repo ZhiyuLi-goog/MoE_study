@@ -76,6 +76,8 @@ sudo docker run --privileged --net host --shm-size=16G --interactive -v /tmp:/tm
 huggingface-cli login --token ${HF_TOKEN}
 
 # Setup envs
+export HF_HOME=/tmp
+export HYDRA_FULL_ERROR=1
 export WANDB_MODE=offline
 
 export PJRT_DEVICE=TPU
@@ -84,6 +86,7 @@ export XLA_IR_DEBUG=1
 export XLA_HLO_DEBUG=1
 
 cd MoE_study/hf
+git pull
 python run_dpo_no_trainer.py model.config_path=mixtral80.json max_length=4096 per_device_train_batch_size=1
 EOF
 "
@@ -98,7 +101,7 @@ xpk cluster create --cluster <cluster_name> --tpu-type=<tpu_type> --num-slices=<
 ```
 
 ### Run workload in GKE
-```
+```bash
 # login token required since 
 # the mixtral model is a restricted model 
 # that requires users e-signed agreement in place before accessing it
@@ -114,6 +117,7 @@ xpk workload create \
 huggingface-cli login --token ${HF_TOKEN}
 
 # Setup envs
+export HF_HOME=/tmp
 export HYDRA_FULL_ERROR=1
 export WANDB_MODE=offline
 
@@ -123,6 +127,7 @@ export XLA_IR_DEBUG=1
 export XLA_HLO_DEBUG=1
 
 cd MoE_study/hf
+git pull
 python run_dpo_no_trainer.py model.config_path=mixtral80.json max_length=4096 per_device_train_batch_size=1
 EOF
 "
@@ -131,9 +136,10 @@ EOF
 ## Experiments
 To recreate the experiments, substitute the Python scripts with the following commands.
 ### Reproduce Pythia2.8b DPO experiments
-Best to run in v4-128 or v5p-128, and it is possible to run in v4-8 as well.
+Best to run in v4-128 or v5p-128, and it is possible to run in v4-8 as well.  
+Remove `dry_run=True` for a true experiment.
 ```bash
-python run_dpo_no_trainer.py per_device_train_batch_size=1 optimizer=RMSprop report_metrics_freq=1 use_synthetic_data=False model.name_or_path=EleutherAI/pythia-2.8b datasets=Anthropic/hh-rlhf max_steps=2600 eval_frequency=312 do_first_eval=True model.policy_dtype=float32 model.reference_dtype=float32 max_grad_norm=10.0 shuffle=True seed=4321 full_precision=True
+python run_dpo_no_trainer.py per_device_train_batch_size=1 optimizer=RMSprop report_metrics_freq=1 use_synthetic_data=False model.name_or_path=EleutherAI/pythia-2.8b datasets=Anthropic/hh-rlhf max_steps=2600 eval_frequency=312 do_first_eval=True model.policy_dtype=float32 model.reference_dtype=float32 max_grad_norm=10.0 shuffle=True seed=4321 full_precision=True dry_run=True
 ```
 
 ### Mixtral8x22b

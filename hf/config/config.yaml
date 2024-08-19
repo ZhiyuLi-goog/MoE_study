@@ -64,6 +64,9 @@ max_length: 512
 # the maximum allowed length for a prompt
 max_prompt_length: 256
 
+# the number of examples to evaluate on (and sample from, if sample_during_eval is true)
+n_eval_examples: null
+
 # The optimizer to use; we use RMSprop because it works about as well as Adam and is more memory-efficient
 optimizer: ADAMW_TORCH_XLA
 
