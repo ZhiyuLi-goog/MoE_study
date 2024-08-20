@@ -485,6 +485,8 @@ def train_step(model, ref_model, train_device_loader, config, step, tracker, opt
 @hydra.main(version_base=None, config_path="config", config_name="config")
 def main(config: DictConfig):
     OmegaConf.resolve(config)
+    if config.local_compile_cache_dir:
+        xr.initialize_cache(config.local_compile_cache_dir)
     set_seed(config.seed)
     if config.full_precision:
         assert config.model.policy_dtype == "float32" and config.model.reference_dtype == "float32", "both dtype of policy and reference need to be float32"

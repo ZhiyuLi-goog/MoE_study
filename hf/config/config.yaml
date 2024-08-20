@@ -92,3 +92,4 @@ flash_attention: True
 dry_run: False
 shuffle: True
 full_precision: False
+local_compile_cache_dir: null
