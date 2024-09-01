@@ -235,7 +235,6 @@ def concatenated_forward(
     We do this to avoid doing two forward passes, because it's faster for FSDP.
     """
     concatenated_batch = create_concatenated_batch(batch)
-    len_chosen = concatenated_batch["concatenated_input_ids"].shape[0] // 2
     all_logits = model(
         concatenated_batch["concatenated_input_ids"],
         attention_mask=concatenated_batch["concatenated_attention_mask"],
@@ -249,14 +248,10 @@ def concatenated_forward(
     )
 
     labels = concatenated_batch["concatenated_labels"].clone()
-    nll_loss = cross_entropy_loss(all_logits[:len_chosen], batch["chosen_input_ids"], pad_token_id)
-
-    chosen_logps = all_logps[:len_chosen]
-    rejected_logps = all_logps[len_chosen:]
-
-    chosen_logits = all_logits[:len_chosen]
-    rejected_logits = all_logits[len_chosen:]
-
+    # use torch.chunk to avoid copy, each chunk is a view of input tensor
+    chosen_logits, rejected_logits = all_logits.chunk(2, axis=0)
+    chosen_logps, rejected_logps = all_logps.chunk(2, axis=0)
+    nll_loss = cross_entropy_loss(chosen_logits, batch["chosen_input_ids"], pad_token_id)
     return (chosen_logps, rejected_logps, chosen_logits, rejected_logits, nll_loss)
 
 
