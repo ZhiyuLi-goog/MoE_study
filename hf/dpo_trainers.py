@@ -1,4 +1,9 @@
 import torch 
+import torch.nn as nn
+from typing import Tuple, Union, List, Dict, Literal
+from omegaconf import DictConfig
+import torch.nn.functional as F
+
 
 def dpo_loss(
         policy_chosen_logps: torch.FloatTensor,

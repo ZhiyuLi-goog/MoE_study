@@ -1,11 +1,13 @@
 from typing import Union, Dict, List, Any
 import os
 import torch
-from hf.preference_datasets import concatenate_datasets, load_dataset
+from datasets import concatenate_datasets, load_dataset, DatasetDict
 from functools import partial
 from dataclasses import dataclass
 from torch.utils.data import DataLoader
 from torch.nn.utils.rnn import pad_sequence
+import numpy as np
+from omegaconf import ListConfig
 
 
 ASSISTANT_PREFIX = "\n\nAssistant:"
@@ -188,6 +190,7 @@ def tokenize_row(
 def get_shp(num_proc: int = 1, load_from_cache_file: bool = True):
     """get and process stanfordnlp/SHP dataset."""
     ds = load_dataset("stanfordnlp/SHP")
+    ds.pop('validation')
 
     def format_process(row):
         prompt = HUMAN_PREFIX + row["history"] + ASSISTANT_PREFIX
@@ -209,6 +212,9 @@ def get_shp(num_proc: int = 1, load_from_cache_file: bool = True):
         num_proc=num_proc,
         load_from_cache_file=load_from_cache_file,
         desc="get_shp/format_process",
+    )
+    ds = ds.select_columns(
+        ['prompt', 'chosen', 'rejected']
     )
     return ds
 
@@ -288,11 +294,12 @@ def get_dataset(name: str, num_proc: int = 1, load_from_cache_file: bool = True)
     else:
         raise ValueError(f"Unknown dataset '{name}'")
 
-    assert set(list(data.values())[0].keys()) == {
-        "prompt",
-        "chosen",
-        "rejected",
-    }, f"Unexpected keys in dataset: {list(list(data.values())[0].keys())}"
+    for split, data_split in data.items():
+        assert set(data_split.features.keys()) == {
+            "prompt",
+            "chosen",
+            "rejected",
+        }, f"Unexpected keys in dataset {split=} {data_split=}"
     return data
 
 
@@ -303,9 +310,10 @@ def get_datasets(config):
             num_proc=config.num_proc,
             load_from_cache_file=config.load_from_cache_file,
         )
-    elif isinstance(config.datasets, list):
-        ds = concatenate_datasets(
-            [
+    elif isinstance(config.datasets, ListConfig):
+        for name in config.datasets:
+            assert isinstance(name, str), f"{config.datasets} should be a list of str but got {name=}"
+        ds_list = [
                 get_dataset(
                     name,
                     num_proc=config.num_proc,
@@ -313,9 +321,16 @@ def get_datasets(config):
                 )
                 for name in config.datasets
             ]
-        )
+        for d in ds_list:
+            assert d.keys() == {'train', 'test'}, f"Unexpected split in dataset, {dataset=}"
+        ds = DatasetDict()
+        for key in ['train', 'test']:
+            ds[key] = concatenate_datasets([d[key] for d in ds_list])
     else:
         raise ValueError(f"{config.datasets=} should be either str or a list of str.")
+    if config.dry_run:
+        for key in ds:
+            ds[key] = ds[key].select(range(config.global_train_batch_size * 10))
     return ds
 
 

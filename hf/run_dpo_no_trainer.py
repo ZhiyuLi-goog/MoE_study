@@ -10,7 +10,6 @@ from typing import Optional, Set
 from transformers import AutoTokenizer
 
 import numpy as np
-import torch.nn.functional as F
 
 import functools
 import gc
@@ -23,9 +22,9 @@ from datetime import datetime
 import os
 import getpass
 from transformers import set_seed
-from utils import get_synthetic_data_device_iterator, get_data_device_iterator, get_cpu_memory, print_batch
+from utils import get_cpu_memory, print_batch
 import torch_xla.debug.metrics as met
-from model_utils_tpu import setup_xla, setup_model_optimizer, get_global_batch_size
+from model_utils_tpu import setup_xla, setup_model_optimizer, get_global_batch_size, Tracker
 from input_pipeline_tpu import get_input_pipeline
 from accelerate import Accelerator
 from dpo_trainers import get_batch_loss_metrics
@@ -91,7 +90,7 @@ def eval_fn(model, ref_model, eval_device_loader, config, step):
     for k, v in group_eval_metrics.items():
         if k not in (f"{prefix}num_samples", f"{prefix}ppl"):
             group_eval_metrics[k] /= group_eval_metrics[f'{prefix}num_samples']
-    group_eval_metrics['trained_examples'] = step * 
+    group_eval_metrics['trained_examples'] = step * config.global_train_batch_size
     return group_eval_metrics 
 
 @hydra.main(version_base=None, config_path="config", config_name="config")
@@ -101,12 +100,13 @@ def main(config: DictConfig):
     logger.info("\n\n************** Experiment configuration ***********")
     logger.info(OmegaConf.to_yaml(config))
 
-    config_path = os.path.join(config.output_path, 'config.yaml')
-    with get_file(config_path) as f:
+    config_path = os.path.join(config.output_dir, 'config.yaml')
+    with get_file(config_path, 'w') as f:
         OmegaConf.save(config, f)
     
-    accelerator = Accelerator(log_with="tensorboard", project_dir=config.output_path)
-    accelerator.init_trackers(config.run_name, config=config)
+
+    accelerator = Accelerator(log_with="tensorboard", project_dir=config.output_dir)
+    tracker = Tracker(config, accelerator, logger)
     setup_xla(config)
 
     tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
@@ -126,10 +126,10 @@ def main(config: DictConfig):
     for step in np.arange(start_step, config.max_steps):
         if step == start_step and config.do_first_eval or step > start_step and step % config.eval_frequency == 0:
             eval_metrics = eval_fn(model, ref_model, eval_device_loader, config, step)
-            accelerator.log({"eval": eval_metrics}, step=step)
+            tracker.record_eval_step(eval_metrics, step * config.global_train_batch_size)
         try:
             train_metrics = train_step(model, ref_model, train_device_loader, config, step, optimizer, scheduler, start_step, tokenizer)
-            accelerator.log({"train": train_metrics}, step=step)
+            tracker.record_train_step(train_metrics, step * config.global_train_batch_size)
         except StopIteration:
             break
 

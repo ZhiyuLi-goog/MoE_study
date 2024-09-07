@@ -72,7 +72,7 @@ def get_synthetic_dataloader(config, tokenizer, global_batch_size):
 
 def get_input_pipeline(config, tokenizer):
     """get input_pipeline."""
-    mesh = xr.get_global_mesh()
+    mesh = xs.get_global_mesh()
     num_devices = xr.global_runtime_device_count()
     global_batch_size = int(config.per_device_train_batch_size * num_devices)
     if config.use_synthetic_data:

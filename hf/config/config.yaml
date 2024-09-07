@@ -31,7 +31,7 @@ label_pad_token_id: -100
 pad_token_id: -100
 
 # which dataset(s) to train on; can pass a list like datasets=[hh,shp]
-datasets: trl-internal-testing/hh-rlhf-helpful-base-trl-style
+datasets: hh
 
 beta: 0.1
 # wandb configuration
@@ -91,3 +91,5 @@ dry_run: False
 shuffle: True
 full_precision: False
 local_compile_cache_dir: null
+tensor_parallelism: 1
+load_from_cache_file: True

@@ -147,7 +147,7 @@ def prepare_model(model, config):
 
 def print_param_sharding(model):
     for name, param in model.named_parameters():
-        logger.info(
+        logger.debug(
             f"{name}: {param.shape} {param.dtype} {torch_xla._XLAC._get_xla_sharding_spec(param)}"
         )
 
@@ -191,8 +191,7 @@ def get_cpu_memory() -> str:
 def setup_model_optimizer(config):
     policy_dtype = getattr(torch, config.model.policy_dtype)
 
-    if config.verbose:
-        logger.info(f"cpu memory usage: {get_cpu_memory()}")
+    logger.debug(f"cpu memory usage: {get_cpu_memory()}")
 
     logger.info("loading model")
     if config.model.config_path:
@@ -224,8 +223,7 @@ def setup_model_optimizer(config):
     logger.info("model prepared")
     gc.collect()
     xm.mark_step()
-    if config.verbose:
-        logger.info(f"cpu memory usage: {get_cpu_memory()}")
+    logger.debug(f"cpu memory usage: {get_cpu_memory()}")
 
     reference_dtype = getattr(torch, config.model.reference_dtype)
     logger.info("loading ref_model")
@@ -256,12 +254,10 @@ def setup_model_optimizer(config):
     logger.info("ref_model prepared")
     gc.collect()
     xm.mark_step()
-    if config.verbose:
-        logger.info(f"cpu memory usage: {get_cpu_memory()}")
+    logger.debug(f"cpu memory usage: {get_cpu_memory()}")
 
-    if config.verbose:
-        print_param_sharding(model)
-        print_param_sharding(ref_model)
+    print_param_sharding(model)
+    print_param_sharding(ref_model)
 
     if config.checkpoint_manager_path:
         torch.distributed.init_process_group("gloo", init_method="xla://")
@@ -307,17 +303,40 @@ def get_global_batch_size(per_device_batch_size):
     return global_batch_size
 
 
+
+
+class Tracker:
+    def __init__(self, config, accelerator, logger):
+        accelerator.init_trackers(config.exp_name, config=config)
+        self.accelerator = accelerator
+        self.logger = logger
+        self.tracker = xm.RateTracker()
+        self.config = config
+
+    @staticmethod
+    def report_train_metrics(num_examples, metrics, tracker):
+        logger.info(f'{num_examples=}, {tracker.rate()=}, {metrics=}')
+
+    @staticmethod
+    def report_eval_metrics(num_examples, metrics):
+        logger.info(f'{num_examples=}, {metrics=}')
+    
+    def record_train_step(self, metrics, num_examples):
+        self.accelerator.log({"train": metrics}, step=num_examples)
+        self.tracker.add(get_global_batch_size(self.config.per_device_train_batch_size))
+        xm.add_step_closure(
+            Tracker.report_train_metrics, args=(num_examples, metrics, self.tracker))
+    def record_eval_step(self, metrics, num_examples):
+        self.accelerator.log({"eval": metrics}, step=num_examples)
+        xm.add_step_closure(
+            Tracker.report_eval_metrics, args=(num_examples, metrics))
+
 '''
 def start_profile():
     server = xp.start_server(9012)
     logger.info(f'Profiling server started: {str(server)}')
 
 
-def report_metrics(step, loss, tracker, metrics):
-    logger.info(f'{step=}, {loss=}, {tracker.rate()=}, {metrics=}')
-
-def report_eval_metrics(step, loss, metrics):
-    logger.info(f'{step=}, {loss=}, {metrics=}')
 
 
 def record_metrics(tb_writer, metrics, step, config):
