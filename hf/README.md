@@ -139,10 +139,10 @@ To recreate the experiments, substitute the Python scripts with the following co
 Best to run in v4-128 or v5p-128, and it is possible to run in v4-8 as well.  
 Remove `dry_run=True` for a true experiment.
 ```bash
-python run_dpo_no_trainer.py per_device_train_batch_size=1 optimizer=RMSprop report_metrics_freq=1 use_synthetic_data=False model.name_or_path=EleutherAI/pythia-2.8b datasets=Anthropic/hh-rlhf max_steps=2600 eval_frequency=312 do_first_eval=True model.policy_dtype=float32 model.reference_dtype=float32 max_grad_norm=10.0 shuffle=True seed=4321 full_precision=True dry_run=True
+python run_dpo_no_trainer.py per_device_train_batch_size=1 optimizer=RMSprop report_metrics_freq=1 use_synthetic_data=False model.name_or_path=EleutherAI/pythia-2.8b datasets=hh max_steps=2600 eval_frequency=312 do_first_eval=True model.policy_dtype=float32 model.reference_dtype=float32 max_grad_norm=10.0 shuffle=True seed=4321 full_precision=True dry_run=True
 ```
 
 ### Mixtral8x22b
 ```bash
-python run_dpo_no_trainer.py model.config_path=mixtral822.json per_device_train_batch_size=1 optimizer=RMSprop checkpoint_manager_path=gs://lizhiyu-multipods-eu-west/moe/checkpoints-20240803/mixtral822/ report_metrics_freq=1 use_synthetic_data=False model.name_or_path=mistralai/Mixtral-8x22B-v0.1 datasets=Anthropic/hh-rlhf max_steps=2600 eval_frequency=312 do_first_eval=True model.policy_dtype=float32 model.reference_dtype=bfloat16 max_grad_norm=10.0 seed=4321
+python run_dpo_no_trainer.py model.config_path=mixtral822.json per_device_train_batch_size=1 optimizer=RMSprop checkpoint_manager_path=gs://lizhiyu-multipods-eu-west/moe/checkpoints-20240803/mixtral822/ report_metrics_freq=1 use_synthetic_data=False model.name_or_path=mistralai/Mixtral-8x22B-v0.1 datasets=hh max_steps=2600 eval_frequency=312 do_first_eval=True model.policy_dtype=float32 model.reference_dtype=bfloat16 max_grad_norm=10.0 seed=4321
 ```
