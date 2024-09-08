@@ -20,6 +20,7 @@ from input_pipeline_tpu import get_input_pipeline
 from accelerate import Accelerator
 from dpo_trainers import get_batch_loss_metrics
 from file_utils import get_file
+import torch_xla.core.xla_model as xm
 from torch_xla.amp import autocast
 
 OmegaConf.register_new_resolver(
