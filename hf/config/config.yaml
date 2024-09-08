@@ -15,30 +15,22 @@ per_device_train_batch_size: 1
 global_train_batch_size: ${get_global_batch_size:${per_device_train_batch_size}}
 
 # the batch size during evaluation and sampling, if enabled
-per_device_eval_batch_size: 16
+per_device_eval_batch_size: ${per_device_train_batch_size}
+global_eval_batch_size: ${get_global_batch_size:${per_device_eval_batch_size}}
 
 max_grad_norm: 0.
 
-torch_dtype: bfloat16
 max_steps: 10
 use_synthetic_data: true
-report_metrics_freq: 3
-
-use_cache: true
-cache_local_dir: null
 
 label_pad_token_id: -100
 pad_token_id: -100
 
 # which dataset(s) to train on; can pass a list like datasets=[hh,shp]
+# including hh, shp, or os
 datasets: hh
 
 beta: 0.1
-# wandb configuration
-wandb:
-  enabled: true
-  entity: null
-  project: "direct-preference-optimization"
 
 output_dir: /tmp
 
@@ -46,7 +38,7 @@ output_dir: /tmp
 do_first_eval: false
 
 # an OmegaConf resolver that returns the local run directory, calling a function in utils.py
-local_run_dir: ${path_join:${output_dir},${exp_name}}
+run_dir: ${path_join:${output_dir},${exp_name}}
 
 # the learning rate
 lr: 5e-7
@@ -71,25 +63,40 @@ optimizer: ADAMW_TORCH_XLA
 # number of linear warmup steps for the learning rate
 warmup_steps: 150
 
-# whether or not to use activation/gradient checkpointing
-activation_checkpointing: false
-
 # evaluate and save model every eval_every steps
 eval_frequency: 3
 
 # num of process in data processing
 num_proc: 1
-xla_metric_report: False
+
+# combine forward
 concatenated_forward: True
-profile_logdir: null
-profile_step: null
 
+# path to load checkpoint
 checkpoint_manager_path: null
-flash_attention: True
 
+# dry run experiment with a subset of dataset
 dry_run: False
+
+# shuffle train data set
 shuffle: True
+
+# use float32 in matmul in torch xla
 full_precision: False
+
+# path to save compile cache for torch xla
 local_compile_cache_dir: null
+
+# tensor_parallelism and fsdp parallelism would be num_devices / tensor_parallelism
 tensor_parallelism: 1
+
+# whether to load dataset from cache
 load_from_cache_file: True
+
+# report frequency of train step
+report_metrics_freq: 1
+
+
+hydra:
+  run:
+    dir: ${run_dir}

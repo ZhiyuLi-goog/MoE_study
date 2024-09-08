@@ -37,34 +37,38 @@ def get_synthetic_dataloader(config, tokenizer, global_batch_size):
     # Scale the batch size with num_devices since there will be only one
     # process that handles all runtime devices.
     assert xr.world_size() == 1
-    data = {
-        "chosen_input_ids": torch.randint(
-            tokenizer.vocab_size,
-            (global_batch_size, config.max_length),
-            dtype=torch.int64,
-        ),
-        "chosen_attention_mask": torch.ones(
-            global_batch_size, config.max_length, dtype=torch.int64
-        ),
-        "rejected_input_ids": torch.randint(
-            tokenizer.vocab_size,
-            (global_batch_size, config.max_length),
-            dtype=torch.int64,
-        ),
-        "rejected_attention_mask": torch.ones(
-            global_batch_size, config.max_length, dtype=torch.int64
-        ),
-    }
-    data["chosen_labels"] = data["chosen_input_ids"]
-    data["rejected_labels"] = data["rejected_input_ids"]
-    data["chosen_labels"][:, : config.max_length // 2] = config.label_pad_token_id
-    data["rejected_labels"][:, : config.max_length // 2] = config.label_pad_token_id
+
+    def get_data(global_batch_size):
+        data = {
+            "chosen_input_ids": torch.randint(
+                tokenizer.vocab_size,
+                (global_batch_size, config.max_length),
+                dtype=torch.int64,
+            ),
+            "chosen_attention_mask": torch.ones(
+                global_batch_size, config.max_length, dtype=torch.int64
+            ),
+            "rejected_input_ids": torch.randint(
+                tokenizer.vocab_size,
+                (global_batch_size, config.max_length),
+                dtype=torch.int64,
+            ),
+            "rejected_attention_mask": torch.ones(
+                global_batch_size, config.max_length, dtype=torch.int64
+            ),
+        }
+        data["chosen_labels"] = data["chosen_input_ids"]
+        data["rejected_labels"] = data["rejected_input_ids"]
+        data["chosen_labels"][:, : config.max_length // 2] = config.label_pad_token_id
+        data["rejected_labels"][:, : config.max_length // 2] = config.label_pad_token_id
+        return data
+
     train_loader = xu.SampleGenerator(
-        data=data,
+        data=get_data(config.global_train_batch_size),
         sample_count=100,
     )
     eval_loader = xu.SampleGenerator(
-        data=data,
+        data=get_data(config.global_eval_batch_size),
         sample_count=10,
     )
     return train_loader, eval_loader

@@ -27,6 +27,7 @@ import torch_xla.debug.metrics as met
 from model_utils_tpu import setup_xla, setup_model_optimizer, get_global_batch_size, Tracker
 from input_pipeline_tpu import get_input_pipeline
 from accelerate import Accelerator
+from accelerate.utils import LoggerType
 from dpo_trainers import get_batch_loss_metrics
 from file_utils import get_file
 
@@ -58,7 +59,7 @@ def train_step(model, ref_model, train_device_loader, config, step, optimizer, s
 
 
 def eval_fn(model, ref_model, eval_device_loader, config, step):
-    prefix = 'eval_'
+    prefix = 'eval/'
     group_eval_metrics = {
         f"{prefix}rewards/chosen": [],
         f"{prefix}rewards/rejected": [],
@@ -100,12 +101,12 @@ def main(config: DictConfig):
     logger.info("\n\n************** Experiment configuration ***********")
     logger.info(OmegaConf.to_yaml(config))
 
-    config_path = os.path.join(config.output_dir, 'config.yaml')
+    config_path = os.path.join(config.run_dir, 'config.yaml')
     with get_file(config_path, 'w') as f:
         OmegaConf.save(config, f)
     
 
-    accelerator = Accelerator(log_with="tensorboard", project_dir=config.output_dir)
+    accelerator = Accelerator(log_with='tensorboard', project_dir=config.run_dir)
     tracker = Tracker(config, accelerator, logger)
     setup_xla(config)
 
@@ -129,10 +130,12 @@ def main(config: DictConfig):
             tracker.record_eval_step(eval_metrics, step * config.global_train_batch_size)
         try:
             train_metrics = train_step(model, ref_model, train_device_loader, config, step, optimizer, scheduler, start_step, tokenizer)
-            tracker.record_train_step(train_metrics, step * config.global_train_batch_size)
+            if step % config.report_metrics_freq == 0:
+                tracker.record_train_step(train_metrics, step * config.global_train_batch_size)
         except StopIteration:
             break
 
+    accelerator.end_training() 
 
 if __name__ == '__main__':
     main()

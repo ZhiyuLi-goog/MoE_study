@@ -1,5 +1,6 @@
 import functools
 import gc
+from omegaconf import OmegaConf
 import torch
 import torch_xla
 import torch_xla.debug.profiler as xp
@@ -37,6 +38,7 @@ logger = logging.get_logger(__name__)
 
 def prepare_model(model, config):
     if config.tensor_parallelism == 1:
+
         def shard_output(output, mesh):
             from transformers.modeling_outputs import CausalLMOutputWithPast
 
@@ -157,6 +159,7 @@ def setup_xla(config):
         xr.initialize_cache(config.local_compile_cache_dir)
     if config.full_precision:
         import jax
+
         assert (
             config.model.policy_dtype == "float32"
             and config.model.reference_dtype == "float32"
@@ -197,7 +200,7 @@ def setup_model_optimizer(config):
     if config.model.config_path:
         model_config = AutoConfig.from_pretrained(config.model.config_path)
         model_config.static = True
-        model_config.flash_attention = config.flash_attention
+        model_config.flash_attention = config.model.flash_attention
         model_config.gmm = False
         model_config.gmm_stack = False
         with torch.device("meta"):
@@ -303,60 +306,56 @@ def get_global_batch_size(per_device_batch_size):
     return global_batch_size
 
 
+def flatten(dictionary, parent_key="", separator="_"):
+    items = []
+    for key, value in dictionary.items():
+        new_key = parent_key + separator + key if parent_key else key
+        if isinstance(value, dict):
+            items.extend(flatten(value, new_key, separator=separator).items())
+        else:
+            items.append((new_key, value))
+    return dict(items)
 
 
 class Tracker:
     def __init__(self, config, accelerator, logger):
-        accelerator.init_trackers(config.exp_name, config=config)
+        exp_config = {}
+        for k, v in flatten(OmegaConf.to_container(config)).items():
+            if isinstance(v, (str, int, float, str, bool, torch.Tensor)):
+                exp_config[k] = v
+            else:
+                exp_config[k] = str(v)
+
+        if xr.process_index() == 0:
+            accelerator.init_trackers("tensorboard", config=exp_config)
         self.accelerator = accelerator
         self.logger = logger
         self.tracker = xm.RateTracker()
         self.config = config
 
-    @staticmethod
-    def report_train_metrics(num_examples, metrics, tracker):
-        logger.info(f'{num_examples=}, {tracker.rate()=}, {metrics=}')
+    def convert_metrics(self, metrics):
+        return {
+            k: v.cpu().item() if isinstance(v, torch.Tensor) else v
+            for k, v in metrics.items()
+        }
 
-    @staticmethod
-    def report_eval_metrics(num_examples, metrics):
-        logger.info(f'{num_examples=}, {metrics=}')
-    
+    def report_train_metrics(self, num_examples, metrics, tracker):
+        metrics = self.convert_metrics(metrics)
+        if xr.process_index() == 0:
+            self.accelerator.log(metrics, step=num_examples)
+        logger.info(f"{num_examples=}, {tracker.rate()=}, {metrics=}")
+
+    def report_eval_metrics(self, num_examples, metrics):
+        metrics = self.convert_metrics(metrics)
+        if xr.process_index() == 0:
+            self.accelerator.log(metrics, step=num_examples)
+        logger.info(f"{num_examples=}, {metrics=}")
+
     def record_train_step(self, metrics, num_examples):
-        self.accelerator.log({"train": metrics}, step=num_examples)
-        self.tracker.add(get_global_batch_size(self.config.per_device_train_batch_size))
+        self.tracker.add(self.config.global_train_batch_size)
         xm.add_step_closure(
-            Tracker.report_train_metrics, args=(num_examples, metrics, self.tracker))
+            self.report_train_metrics, args=(num_examples, metrics, self.tracker)
+        )
+
     def record_eval_step(self, metrics, num_examples):
-        self.accelerator.log({"eval": metrics}, step=num_examples)
-        xm.add_step_closure(
-            Tracker.report_eval_metrics, args=(num_examples, metrics))
-
-'''
-def start_profile():
-    server = xp.start_server(9012)
-    logger.info(f'Profiling server started: {str(server)}')
-
-
-
-
-def record_metrics(tb_writer, metrics, step, config):
-    for k, v in metrics.items():
-        tb_writer.add_scalar(k, v, step)
-
-    full_log = step % config.log_period == 0
-
-    max_logging.log(
-        f"completed step: {step}, seconds: {metrics['scalar']['perf/step_time_seconds']:.3f}, "
-        f"TFLOP/s/device: {metrics['scalar']['perf/per_device_tflops_per_sec']:.3f}, "
-        f"Tokens/s/device: {metrics['scalar']['perf/per_device_tokens_per_sec']:.3f}, "
-        f"total_weights: {metrics['scalar']['learning/total_weights']}, "
-        f"loss: {metrics['scalar']['learning/loss']:.3f}"
-    )
-
-    writer.flush()
-    tracker = xm.RateTracker()
-            xm.add_step_closure(
-                report_metrics, args=(step, loss, tracker, metrics))
-    xm.add_step_closure(
-        report_eval_metrics, args=(step, group_eval_metrics[f"{prefix}losses"], group_eval_metrics))
-'''
+        xm.add_step_closure(self.report_eval_metrics, args=(num_examples, metrics))

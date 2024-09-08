@@ -190,17 +190,17 @@ def tokenize_row(
 def get_shp(num_proc: int = 1, load_from_cache_file: bool = True):
     """get and process stanfordnlp/SHP dataset."""
     ds = load_dataset("stanfordnlp/SHP")
-    ds.pop('validation')
+    ds.pop("validation")
 
     def format_process(row):
         prompt = HUMAN_PREFIX + row["history"] + ASSISTANT_PREFIX
         # if it is 1 if A is preferred to B; 0 if B is preferred to A
         if row["labels"] == 1:
-            chosen = " " + row["human_ref_A"]
-            rejected = " " + row["human_ref_B"]
+            chosen = row["human_ref_A"]
+            rejected = row["human_ref_B"]
         else:
-            chosen = " " + row["human_ref_B"]
-            rejected = " " + row["human_ref_A"]
+            chosen = row["human_ref_B"]
+            rejected = row["human_ref_A"]
         return {
             "prompt": prompt,
             "chosen": chosen,
@@ -213,9 +213,7 @@ def get_shp(num_proc: int = 1, load_from_cache_file: bool = True):
         load_from_cache_file=load_from_cache_file,
         desc="get_shp/format_process",
     )
-    ds = ds.select_columns(
-        ['prompt', 'chosen', 'rejected']
-    )
+    ds = ds.select_columns(["prompt", "chosen", "rejected"])
     return ds
 
 
@@ -237,8 +235,8 @@ def get_hh(num_proc: int = 1, load_from_cache_file: bool = True):
         prompt = extract_anthropic_prompt(row["chosen"], row["rejected"])
         return {
             "prompt": prompt,
-            "chosen": row["chosen"][len(prompt) :],
-            "rejected": row["rejected"][len(prompt) :],
+            "chosen": row["chosen"][len(prompt) :].strip(),
+            "rejected": row["rejected"][len(prompt) :].strip(),
         }
 
     ds = ds.map(
@@ -266,8 +264,8 @@ def get_os(num_proc: int = 1, load_from_cache_file: bool = True):
         prompt = HUMAN_PREFIX + format_str.format(**row["info"]) + ASSISTANT_PREFIX
         choice = row["choice"]
         # need to remove the leading space
-        chosen = " " + row["summaries"][choice]["text"].strip()
-        rejected = " " + row["summaries"][1 - choice]["text"].strip()
+        chosen = row["summaries"][choice]["text"].strip()
+        rejected = row["summaries"][1 - choice]["text"].strip()
         return {
             "prompt": prompt,
             "chosen": chosen,
@@ -280,6 +278,8 @@ def get_os(num_proc: int = 1, load_from_cache_file: bool = True):
         load_from_cache_file=load_from_cache_file,
         desc="get_os/format_process",
     )
+    ds = ds.select_columns(["prompt", "chosen", "rejected"])
+    ds["test"] = ds.pop("validation")
     return ds
 
 
@@ -312,32 +312,33 @@ def get_datasets(config):
         )
     elif isinstance(config.datasets, ListConfig):
         for name in config.datasets:
-            assert isinstance(name, str), f"{config.datasets} should be a list of str but got {name=}"
+            assert isinstance(
+                name, str
+            ), f"{config.datasets} should be a list of str but got {name=}"
         ds_list = [
-                get_dataset(
-                    name,
-                    num_proc=config.num_proc,
-                    load_from_cache_file=config.load_from_cache_file,
-                )
-                for name in config.datasets
-            ]
+            get_dataset(
+                name,
+                num_proc=config.num_proc,
+                load_from_cache_file=config.load_from_cache_file,
+            )
+            for name in config.datasets
+        ]
         for d in ds_list:
-            assert d.keys() == {'train', 'test'}, f"Unexpected split in dataset, {dataset=}"
+            assert d.keys() == {"train", "test"}, f"Unexpected split in dataset, {d=}"
         ds = DatasetDict()
-        for key in ['train', 'test']:
+        for key in ["train", "test"]:
             ds[key] = concatenate_datasets([d[key] for d in ds_list])
     else:
         raise ValueError(f"{config.datasets=} should be either str or a list of str.")
     if config.dry_run:
-        for key in ds:
-            ds[key] = ds[key].select(range(config.global_train_batch_size * 10))
+        ds["train"] = ds["train"].select(range(config.global_train_batch_size * 10))
+        ds["test"] = ds["test"].select(range(config.global_eval_batch_size * 10))
     return ds
 
 
 def get_dataloader(
     config,
     tokenizer,
-    global_batch_size,
     load_from_cache_file=True,
 ):
     """create dataloader."""
@@ -375,7 +376,7 @@ def get_dataloader(
 
     train_loader = DataLoader(
         ds["train"],
-        batch_size=global_batch_size,
+        batch_size=config.global_train_batch_size,
         shuffle=config.shuffle,
         drop_last=True,
         collate_fn=data_collator,
@@ -384,7 +385,7 @@ def get_dataloader(
     # TODO: drop_last as false after padding eval_loader up to multiple of global_batch_size
     eval_loader = DataLoader(
         ds["test"],
-        batch_size=global_batch_size,
+        batch_size=config.global_eval_batch_size,
         collate_fn=data_collator,
         drop_last=True,
     )
