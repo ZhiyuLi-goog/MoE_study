@@ -61,7 +61,8 @@ def train_step(
     loss.backward()
     if config.max_grad_norm > 0.0:
         grad_norm = clip_gradient(model, config)
-        metrics["grad_norm"] = grad_norm
+        metrics["train/grad_norm"] = grad_norm
+    metrics["train/lr"] = scheduler.get_last_lr()[0]
     optimizer.step()
     scheduler.step()
     return metrics
