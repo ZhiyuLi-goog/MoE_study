@@ -122,11 +122,13 @@ def tokenize_row(
 
     # add EOS token to end of answer. Avoid adding if it's already there
     eos_token_id = tokenizer.eos_token_id
-    if eos_token_id != chosen_tokens["input_ids"][-1]:
+    if len(chosen_tokens["input_ids"]) == 0 or eos_token_id != chosen_tokens["input_ids"][-1]:
         chosen_tokens["input_ids"].append(eos_token_id)
-    if eos_token_id != rejected_tokens["input_ids"][-1]:
+        chosen_tokens["attention_mask"].append(1)
+    if len(rejected_tokens["input_ids"]) == 0 or eos_token_id != rejected_tokens["input_ids"][-1]:
         rejected_tokens["input_ids"].append(eos_token_id)
         rejected_tokens["attention_mask"].append(1)
+
     longer_response_length = max(
         len(chosen_tokens["input_ids"]), len(rejected_tokens["input_ids"])
     )
@@ -272,6 +274,10 @@ def get_os(num_proc: int = 1, load_from_cache_file: bool = True):
             "rejected": rejected,
         }
 
+    # hack load the same number of test/eval example as hh dataset for balanced combination
+    ds["test"] = ds.pop("validation")
+    ds["test"] = ds["test"].select(range(8552))
+
     ds = ds.map(
         format_process,
         num_proc=num_proc,
@@ -279,7 +285,7 @@ def get_os(num_proc: int = 1, load_from_cache_file: bool = True):
         desc="get_os/format_process",
     )
     ds = ds.select_columns(["prompt", "chosen", "rejected"])
-    ds["test"] = ds.pop("validation")
+
     return ds
 
 
