@@ -107,7 +107,7 @@ def prepare_model(model, config):
         model.to("xla")
         mesh = xs.get_global_mesh()
         for name, param in model.named_parameters():
-            logger.info("> [2D] Sharding tensor", name, param.shape)
+            logger.debug(f"> [2D] Sharding tensor {name}, {param.shape}")
 
             # Here we intentionally skip layernorm and moe.gate weights given they are small.
             if "embed_tokens" in name:
