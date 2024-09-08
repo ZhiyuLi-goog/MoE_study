@@ -174,7 +174,6 @@ def concatenated_forward(
         label_pad_token_id=label_pad_token_id,
     )
 
-    labels = concatenated_batch["concatenated_labels"].clone()
     # use torch.chunk to avoid copy, each chunk is a view of input tensor
     chosen_logits, rejected_logits = all_logits.chunk(2, axis=0)
     chosen_logps, rejected_logps = all_logps.chunk(2, axis=0)

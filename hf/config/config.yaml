@@ -2,7 +2,7 @@ defaults:
 - _self_
 - model: blank_model
 
-# name for this experiment in the local run directory and on wandb
+# name for this experiment in the local run directory
 exp_name: moe_trial
 
 config_path: null
@@ -96,6 +96,8 @@ load_from_cache_file: True
 # report frequency of train step
 report_metrics_freq: 1
 
+# cache of models
+cache_local_dir: null
 
 hydra:
   run:

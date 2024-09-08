@@ -3,10 +3,8 @@ import gc
 from omegaconf import OmegaConf
 import torch
 import torch_xla
-import torch_xla.debug.profiler as xp
 import torch_xla.core.xla_model as xm
 import torch_xla.runtime as xr
-import torch_xla.utils.utils as xu
 import torch_xla.distributed.spmd as xs
 from transformers import logging
 from torch_xla.experimental.distributed_checkpoint import (
@@ -30,7 +28,6 @@ from transformers.trainer_pt_utils import (
 )
 from psutil import Process
 from transformers import AutoModelForCausalLM, AutoConfig
-from accelerate.utils import LoggerType
 
 
 logger = logging.get_logger(__name__)
@@ -40,8 +37,6 @@ def prepare_model(model, config):
     if config.tensor_parallelism == 1:
 
         def shard_output(output, mesh):
-            from transformers.modeling_outputs import CausalLMOutputWithPast
-
             real_output = None
             if isinstance(output, torch.Tensor):
                 real_output = output

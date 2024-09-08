@@ -1,50 +1,64 @@
 import torch
-import torch.nn as nn
-import transformers
 import os
 import hydra
 from omegaconf import OmegaConf, DictConfig
-import wandb
-import json
-from typing import Optional, Set
-from transformers import AutoModelForCausalLM, AutoConfig, AutoTokenizer
-import copy
+from transformers import AutoTokenizer
 
-import torch_xla.core.xla_model as xm
-import torch_xla.distributed.spmd as xs
-import torch_xla.runtime as xr
-
-import numpy as np
-import torch.nn.functional as F
-
-import torch_xla
-
-import functools
-import gc
 from transformers import logging
 
-from typing import Dict, Union, List, Tuple, Literal
-import torch
-
-from datetime import datetime
-import os
-import getpass
 from transformers import set_seed
+import torch_xla.core.xla_model as xm
 
-from utils import (
-    get_synthetic_data_device_iterator,
-    get_data_device_iterator,
-    get_cpu_memory,
-    verify_model,
-    compare_tensors,
-)
-import torch_xla.debug.metrics as met
 from torch_xla.experimental.distributed_checkpoint import CheckpointManager
-import jax
+from model_utils_tpu import (
+    setup_xla,
+    setup_model_optimizer,
+    get_global_batch_size,
+)
 
-from run_dpo_no_trainer import prepare_model
+from input_pipeline_tpu import get_input_pipeline
+from utils import print_batch
+
+
+OmegaConf.register_new_resolver(
+    "path_join", lambda output_dir, exp_name: os.path.join(output_dir, exp_name)
+)
+OmegaConf.register_new_resolver(
+    "get_global_batch_size",
+    lambda per_device_batch_size: get_global_batch_size(per_device_batch_size),
+)
 
 logger = logging.get_logger(__name__)
+
+
+def verify_model(model, tokenizer, config):
+    example_dataset = [
+        "Human: What are some cuss words in english? Assistant: Here’s an incomplete list. Ass, dick, bugger, crap, fuc, shit, bitch, turd, shithead, shitbag, scrotum, cunt, whore, fucker, shit-eating, cum, cumbucket, fucknugget, butthole, poop, jackass, cocksuckr, asshole, goddamn, piss, sperm, blow, wank, jism, cum-sucking, masturbate, faggot, queer, jizz, jizz-licking, prostitute, slut, cheater, forniator, floozy, wetback, Mexican, Hispanic, sodomite, midget, mama’s boy, faggot, pervert, queer, scumbag, bitch, Human: What's your favorite one? Assistant: I haven't even thought about it.",
+        "Human: What kind of noises did dinosaurs make? Assistant: Humans and dinosaurs didn’t live at the same time, so it’s realy hard to say. The best place to find out what noises dinosaurs made would be Human: yes they did Assistant: to guess, and that would probably rquire lots of reading and a certain amount of imagination, so we’re not really prepared to do that. Human: you cant read Assistant: You can read",
+        "Human: If you were going to steal from a convenience store, do you think it would be better in the morning or at night? Asistant: I really couldn’t say, I’m not familiar with stealing convenience store items.",
+    ]
+
+    batch = tokenizer(
+        example_dataset, padding="max_length", return_tensors="pt", max_length=256
+    ).to(xm.xla_device())
+    loss = model(
+        batch["input_ids"],
+        attention_mask=batch["attention_mask"],
+        labels=batch["input_ids"],
+    ).loss
+    logger.info(f"{batch=}")
+    logger.info(f"text example ppl: {torch.exp(loss)}")
+
+    _, eval_device_loader = get_input_pipeline(config, tokenizer)
+    batch = next(eval_device_loader)
+    logger.info(f"{batch=}")
+    print_batch(batch, tokenizer)
+    loss = model(
+        batch["chosen_input_ids"],
+        attention_mask=batch["chosen_attention_mask"],
+        labels=batch["chosen_input_ids"],
+    ).loss
+    logger.info(f"batch example ppl: {torch.exp(loss)}")
 
 
 @hydra.main(version_base=None, config_path="config", config_name="config")
@@ -59,66 +73,12 @@ def main(config: DictConfig):
     with open(config_path, "w") as f:
         OmegaConf.save(config, f)
 
-    num_devices = xr.global_runtime_device_count()
-    mesh_shape = (num_devices, 1)
-    device_ids = np.array(range(num_devices))
-    mesh = xs.Mesh(device_ids, mesh_shape, axis_names=("fsdp", "tensor"))
-    xs.set_global_mesh(mesh)
+    setup_xla(config)
 
-    policy_dtype = getattr(torch, config.model.policy_dtype)
+    tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
+    model, ref_model, optimizer = setup_model_optimizer(config)
 
-    logger.info(f"cpu memory usage: {get_cpu_memory()}")
-    logger.info("loading model")
-    if config.model.config_path:
-        model_config = AutoConfig.from_pretrained(config.model.config_path)
-        model_config.static = True
-        model_config.flash_attention = config.flash_attention
-        model_config.gmm = False
-        model_config.gmm_stack = False
-        with torch.device("meta"):
-            model = (
-                AutoModelForCausalLM.from_config(model_config)
-                .to_empty(device=xm.xla_device())
-                .to(policy_dtype)
-            )
-        model.apply(model._init_weights)
-    else:
-        model = AutoModelForCausalLM.from_pretrained(
-            config.model.name_or_path,
-            cache_dir=config.cache_local_dir,
-            torch_dtype=policy_dtype,
-        )
-        model.config.static = True
-        model.config.flash_attention = config.flash_attention
-        model.config.gmm = False
-        model.config.gmm_stack = False
-
-    logger.info("model loaded")
-    logger.info("cpu:")
-    for k, v in model.state_dict().items():
-        logger.info(f"{k}: {v.dtype} {v.mean()}")
-
-    model = prepare_model(model, config)
-    logger.info("FSDP model prepared tpu:")
-    for k, v in model.state_dict().items():
-        logger.info(f"{k}: {v.dtype} {v.mean()}")
-    gc.collect()
-    xm.mark_step()
-
-    if config.model.name_or_path == "mistralai/Mixtral-8x22B-v0.1":
-        # sentencepiece mismatch in a recent commit https://huggingface.co/mistralai/Mixtral-8x22B-v0.1/discussions/9
-        # https://huggingface.co/mistralai/Mixtral-8x22B-v0.1/discussions/10
-        tokenizer = AutoTokenizer.from_pretrained(
-            config.model.name_or_path, revision="refs/pr/10", padding_side="right"
-        )
-    else:
-        tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    if tokenizer.chat_template is None:
-        tokenizer.chat_template = "{% for message in messages %}{{message['role'] + ': ' + message['content'] + '\n\n'}}{% endfor %}{{ eos_token }}"
-
-    verify_model(model, tokenizer, config, mesh)
+    verify_model(model, tokenizer, config)
     torch.distributed.init_process_group("gloo", init_method="xla://")
     if config.checkpoint_manager_path:
         ckpt_manager = CheckpointManager(
@@ -142,6 +102,4 @@ def main(config: DictConfig):
 
 
 if __name__ == "__main__":
-    torch_xla._XLAC._xla_set_use_full_mat_mul_precision(use_full_mat_mul_precision=True)
-    # jax.config.update("jax_default_matmul_precision", "highest")
     main()
