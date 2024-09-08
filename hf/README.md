@@ -73,7 +73,6 @@ gcloud compute tpus tpu-vm ssh ${TPU_NAME} \
 --worker=all \
 --command="
 sudo docker run --privileged --net host --shm-size=16G --interactive -v /tmp:/tmp ${IMAGE} bash -s <<EOF
-huggingface-cli login --token ${HF_TOKEN}
 
 # Setup envs
 export HF_HOME=/tmp
@@ -87,6 +86,7 @@ export XLA_HLO_DEBUG=1
 
 cd MoE_study/hf
 git pull
+huggingface-cli login --token ${HF_TOKEN}
 python run_dpo_no_trainer.py model.config_path=mixtral80.json max_length=4096 per_device_train_batch_size=1
 EOF
 "
@@ -114,8 +114,6 @@ xpk workload create \
 --tpu-type=<tpu_type> \
 --num-slices=<num_slices> \
 --command="
-huggingface-cli login --token ${HF_TOKEN}
-
 # Setup envs
 export HF_HOME=/tmp
 export HYDRA_FULL_ERROR=1
@@ -128,6 +126,7 @@ export XLA_HLO_DEBUG=1
 
 cd MoE_study/hf
 git pull
+huggingface-cli login --token ${HF_TOKEN}
 python run_dpo_no_trainer.py model.config_path=mixtral80.json max_length=4096 per_device_train_batch_size=1
 EOF
 "
