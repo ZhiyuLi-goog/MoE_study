@@ -241,19 +241,19 @@ def get_batch_loss_metrics(
     reward_accuracies = (chosen_rewards > rejected_rewards).float()
 
     prefix = "eval/" if train_eval == "eval" else "train/"
-    num_samples = batch["chosen_input_ids"].shape[0]
+    num_examples = batch["chosen_input_ids"].shape[0]
     # TODO
     # mute metrics now since it trigger recompile in pytorch xla
-    metrics[f"{prefix}rewards/chosen"] = chosen_rewards.sum()
-    metrics[f"{prefix}rewards/rejected"] = rejected_rewards.sum()
-    metrics[f"{prefix}rewards/accuracies"] = reward_accuracies.sum()
-    metrics[f"{prefix}rewards/margins"] = (chosen_rewards - rejected_rewards).sum()
-    metrics[f"{prefix}logps/rejected"] = policy_rejected_logps.detach().sum()
-    metrics[f"{prefix}logps/chosen"] = policy_chosen_logps.detach().sum()
-    metrics[f"{prefix}logits/rejected"] = policy_rejected_logits.detach().sum()
-    metrics[f"{prefix}logits/chosen"] = policy_chosen_logits.detach().sum()
-    metrics[f"{prefix}losses"] = losses.detach().sum()
-    metrics[f"{prefix}num_samples"] = num_samples
-    metrics[f"{prefix}ppl"] = torch.exp(policy_chosen_logps_avg.detach())
+    metrics[f"{prefix}rewards/chosen_per_example"] = chosen_rewards.mean()
+    metrics[f"{prefix}rewards/rejected_per_example"] = rejected_rewards.mean()
+    metrics[f"{prefix}rewards/accuracies_per_example"] = reward_accuracies.mean()
+    metrics[f"{prefix}rewards/margins_per_example"] = (chosen_rewards - rejected_rewards).mean()
+    metrics[f"{prefix}logps/rejected_per_example"] = policy_rejected_logps.detach().mean()
+    metrics[f"{prefix}logps/chosen_per_example"] = policy_chosen_logps.detach().mean()
+    metrics[f"{prefix}logits/rejected_per_example"] = policy_rejected_logits.detach().mean()
+    metrics[f"{prefix}logits/chosen_per_example"] = policy_chosen_logits.detach().mean()
+    metrics[f"{prefix}losses_per_example"] = losses.detach().mean()
+    metrics[f"{prefix}num_examples"] = num_examples
+    metrics[f"{prefix}ppl_per_token"] = torch.exp(policy_chosen_logps_avg.detach())
 
     return losses.mean(), metrics

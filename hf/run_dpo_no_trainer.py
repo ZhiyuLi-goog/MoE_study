@@ -67,20 +67,20 @@ def train_step(
     return metrics
 
 
-def eval_fn(model, ref_model, eval_device_loader, config, step):
+def eval_fn(model, ref_model, eval_device_loader, config, step, tracker):
     prefix = "eval/"
     group_eval_metrics = {
-        f"{prefix}rewards/chosen": [],
-        f"{prefix}rewards/rejected": [],
-        f"{prefix}rewards/accuracies": [],
-        f"{prefix}rewards/margins": [],
-        f"{prefix}logps/rejected": [],
-        f"{prefix}logps/chosen": [],
-        f"{prefix}logits/rejected": [],
-        f"{prefix}logits/chosen": [],
-        f"{prefix}losses": [],
-        f"{prefix}num_samples": [],
-        f"{prefix}ppl": [],
+        f"{prefix}rewards/chosen_per_example": [],
+        f"{prefix}rewards/rejected_per_example": [],
+        f"{prefix}rewards/accuracies_per_example": [],
+        f"{prefix}rewards/margins_per_example": [],
+        f"{prefix}logps/rejected_per_example": [],
+        f"{prefix}logps/chosen_per_example": [],
+        f"{prefix}logits/rejected_per_example": [],
+        f"{prefix}logits/chosen_per_example": [],
+        f"{prefix}losses_per_example": [],
+        f"{prefix}num_examples": [],
+        f"{prefix}ppl_per_token": [],
     }
 
     for eval_batch in eval_device_loader:
@@ -93,17 +93,15 @@ def eval_fn(model, ref_model, eval_device_loader, config, step):
             group_eval_metrics[k].append(eval_metrics[k])
 
     for k, v in group_eval_metrics.items():
-        # ppl is per token metrics which was averged
-        if k == f"{prefix}ppl":
-            group_eval_metrics[k] = sum(v) / len(v)
-        else:
+        if k == f"{prefix}num_examples":
             group_eval_metrics[k] = sum(v)
+        else:
+            group_eval_metrics[k] = sum(v) / len(v)
 
-    for k, v in group_eval_metrics.items():
-        if k not in (f"{prefix}num_samples", f"{prefix}ppl"):
-            group_eval_metrics[k] /= group_eval_metrics[f"{prefix}num_samples"]
-    group_eval_metrics["trained_examples"] = step * config.global_train_batch_size
-    return group_eval_metrics
+    group_eval_metrics[f"{prefix}trained_num_examples"] = step * config.global_train_batch_size
+    tracker.record_eval_step(
+        group_eval_metrics, step * config.global_train_batch_size
+    )
 
 
 @hydra.main(version_base=None, config_path="config", config_name="config")
@@ -145,10 +143,7 @@ def main(config: DictConfig):
             or step > start_step
             and step % config.eval_frequency == 0
         ):
-            eval_metrics = eval_fn(model, ref_model, eval_device_loader, config, step)
-            tracker.record_eval_step(
-                eval_metrics, step * config.global_train_batch_size
-            )
+            eval_metrics = eval_fn(model, ref_model, eval_device_loader, config, step, tracker)
         try:
             train_metrics = train_step(
                 model,

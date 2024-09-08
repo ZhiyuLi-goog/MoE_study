@@ -338,13 +338,13 @@ class Tracker:
         metrics = self.convert_metrics(metrics)
         if xr.process_index() == 0:
             self.accelerator.log(metrics, step=num_examples)
-        logger.info(f"{num_examples=}, {tracker.rate()=}, {metrics=}")
+        logger.info(f"{metrics=}, {num_examples=}, {tracker.rate()=}")
 
     def report_eval_metrics(self, num_examples, metrics):
         metrics = self.convert_metrics(metrics)
         if xr.process_index() == 0:
             self.accelerator.log(metrics, step=num_examples)
-        logger.info(f"{num_examples=}, {metrics=}")
+        logger.info(f"{metrics=}, {num_examples=}")
 
     def record_train_step(self, metrics, num_examples):
         self.tracker.add(self.config.global_train_batch_size)
