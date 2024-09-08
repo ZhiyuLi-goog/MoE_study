@@ -281,6 +281,8 @@ def setup_model_optimizer(config):
             model.apply(model._init_weights)
             ref_model.apply(ref_model._init_weights)
 
+    # hack create a float32 optimizer
+    model = model.to(torch.float32)
     if config.optimizer == "ADAMW_TORCH_XLA":
         from torch_xla.amp.syncfree import AdamW
 
@@ -292,6 +294,8 @@ def setup_model_optimizer(config):
 
     # initialize optimizer states
     optimizer = prime_optimizer(optimizer)
+    model.to(policy_dtype)
+
     return model, ref_model, optimizer
 
 
