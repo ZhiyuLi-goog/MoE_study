@@ -20,6 +20,7 @@ from input_pipeline_tpu import get_input_pipeline
 from accelerate import Accelerator
 from dpo_trainers import get_batch_loss_metrics
 from file_utils import get_file
+from torch_xla.amp import autocast
 
 OmegaConf.register_new_resolver(
     "path_join", lambda output_dir, exp_name: os.path.join(output_dir, exp_name)
@@ -54,9 +55,10 @@ def train_step(
         print_batch(batch, tokenizer)
     optimizer.zero_grad()
     model.train()
-    loss, metrics = get_batch_loss_metrics(
-        model, ref_model, batch, "train", beta=config.beta, config=config
-    )
+    with autocast(xm.xla_device()):
+        loss, metrics = get_batch_loss_metrics(
+            model, ref_model, batch, "train", beta=config.beta, config=config
+        )
 
     loss.backward()
     if config.max_grad_norm > 0.0:
@@ -87,9 +89,10 @@ def eval_fn(model, ref_model, eval_device_loader, config, step, tracker):
     for eval_batch in eval_device_loader:
         model.eval()
         with torch.no_grad():
-            _, eval_metrics = get_batch_loss_metrics(
-                model, ref_model, eval_batch, "eval", beta=config.beta, config=config
-            )
+            with autocast(xm.xla_device()):
+                _, eval_metrics = get_batch_loss_metrics(
+                    model, ref_model, eval_batch, "eval", beta=config.beta, config=config
+                )
         for k in group_eval_metrics:
             group_eval_metrics[k].append(eval_metrics[k])
 
