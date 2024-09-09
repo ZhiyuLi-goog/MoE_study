@@ -331,11 +331,13 @@ def get_datasets(config):
         ]
         for d in ds_list:
             assert d.keys() == {"train", "test"}, f"Unexpected split in dataset, {d=}"
+
+        # use same number of test examples in combination
+        for d in ds_list:
+            d["test"] = d["test"].select(range(8552))
+
         ds = DatasetDict()
         for key in ["train", "test"]:
-            # use same number of test examples
-            if key == "test":
-                ds["test"] = ds["test"].select(range(8552))
             ds[key] = concatenate_datasets([d[key] for d in ds_list])
     else:
         raise ValueError(f"{config.datasets=} should be either str or a list of str.")
