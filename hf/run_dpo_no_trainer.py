@@ -116,6 +116,7 @@ def main(config: DictConfig):
     with get_file(config_path, "w") as f:
         OmegaConf.save(config, f)
 
+    logger.info(f"log tensorboard to {os.path.join(config.run_dir, 'tensorboard')}")
     accelerator = Accelerator(log_with="tensorboard", project_dir=config.run_dir)
     tracker = Tracker(config, accelerator, logger)
     setup_xla(config)
