@@ -1,0 +1,47 @@
+# @package _global_
+exp_name: pythia28-hh-240908-162850
+config_path: null
+seed: 4321
+per_device_train_batch_size: 1
+global_train_batch_size: ${get_global_batch_size:${per_device_train_batch_size}}
+per_device_eval_batch_size: 1
+global_eval_batch_size: ${get_global_batch_size:${per_device_train_batch_size}}
+max_grad_norm: 10.0
+max_steps: 5500
+use_synthetic_data: false
+label_pad_token_id: -100
+pad_token_id: -100
+datasets: hh
+beta: 0.1
+output_dir: /app/output
+do_first_eval: true
+run_dir: /app/output/pythia28-hh-240908-162850
+lr: 5.0e-07
+max_length: 512
+max_prompt_length: 256
+n_eval_examples: null
+optimizer: RMSprop
+warmup_steps: 150
+eval_frequency: 312
+num_proc: 1
+concatenated_forward: true
+checkpoint_manager_path: null
+dry_run: false
+shuffle: true
+full_precision: true
+local_compile_cache_dir: /app/output/pythia28-hh-240908-162850/compile_cache
+tensor_parallelism: 1
+load_from_cache_file: true
+report_metrics_freq: 1
+cache_local_dir: null
+model:
+  config_path: null
+  name_or_path: EleutherAI/pythia-2.8b
+  policy_dtype: float32
+  reference_dtype: float32
+  flash_attention: true
+  fsdp_config:
+    fsdp_transformer_layer_cls_to_wrap:
+    - MixtralDecoderLayer
+    min_num_params: 0
+    xla_fsdp_grad_ckpt: true
