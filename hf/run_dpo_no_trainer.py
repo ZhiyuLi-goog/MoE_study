@@ -10,24 +10,28 @@ from transformers import logging
 
 from transformers import set_seed
 from utils import get_cpu_memory, print_batch
-from model_utils_tpu import (
-    setup_xla,
-    setup_model_optimizer,
-    get_global_batch_size,
-    Tracker,
-)
-from input_pipeline_tpu import get_input_pipeline
-from accelerate import Accelerator
 from dpo_trainers import get_batch_loss_metrics
 from file_utils import get_file
 
-OmegaConf.register_new_resolver(
-    "path_join", lambda output_dir, exp_name: os.path.join(output_dir, exp_name)
-)
-OmegaConf.register_new_resolver(
-    "get_global_batch_size",
-    lambda per_device_batch_size: get_global_batch_size(per_device_batch_size),
-)
+USE_CUDA = torch.cuda.is_available() #os.environ.get('USE_CUDA', False)
+assert USE_CUDA == False, "CUDA not supported"
+if not USE_CUDA:
+    from model_utils_tpu import (
+        setup_xla,
+        setup_model_optimizer,
+        get_global_batch_size,
+        Tracker,
+    )
+    from input_pipeline_tpu import get_input_pipeline
+    from accelerate import Accelerator
+
+    OmegaConf.register_new_resolver(
+        "get_global_batch_size",
+        lambda per_device_batch_size: get_global_batch_size(per_device_batch_size),
+    )
+    OmegaConf.register_new_resolver(
+        "path_join", lambda output_dir, exp_name: os.path.join(output_dir, exp_name)
+    )    
 
 
 logger = logging.get_logger(__name__)
@@ -105,34 +109,37 @@ def eval_fn(model, ref_model, eval_device_loader, config, step, tracker):
     )
 
 
-@hydra.main(version_base=None, config_path="config", config_name="config")
+def hydra_decorator(config_path, config_name):
+    def decorator(func):
+        if not USE_CUDA:
+            return hydra.main(version_base=None, config_path=config_path, config_name=config_name)(func)
+    return decorator
+
+@hydra_decorator(config_path="config", config_name="config")
 def main(config: DictConfig):
     OmegaConf.resolve(config)
     set_seed(config.seed)
     logger.info("\n\n************** Experiment configuration ***********")
     logger.info(OmegaConf.to_yaml(config))
 
-    config_path = os.path.join(config.run_dir, "config.yaml")
-    with get_file(config_path, "w") as f:
-        OmegaConf.save(config, f)
+    if not USE_CUDA:
+        config_path = os.path.join(config.run_dir, "config.yaml")
+        with get_file(config_path, "w") as f:
+            OmegaConf.save(config, f)
 
-    accelerator = Accelerator(log_with="tensorboard", project_dir=config.run_dir)
-    tracker = Tracker(config, accelerator, logger)
-    setup_xla(config)
+        accelerator = Accelerator(log_with="tensorboard", project_dir=config.run_dir)
+        tracker = Tracker(config, accelerator, logger)
+        setup_xla(config)
 
-    tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
-    model, ref_model, optimizer = setup_model_optimizer(config)
+        tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
+        model, ref_model, optimizer, scheduler = setup_model_optimizer(config)
 
     if tokenizer.vocab_size != model.config.vocab_size:
         logger.warning(
             f"Found mismatch between {tokenizer.vocab_size=} and {model.config.vocab_size}"
         )
-    train_device_loader, eval_device_loader = get_input_pipeline(config, tokenizer)
+    train_device_loader, eval_device_loader, train_ds, _ = get_input_pipeline(config, tokenizer)
 
-    scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optimizer,
-        lr_lambda=lambda step: min(1.0, (step + 1) / (config.warmup_steps + 1)),
-    )
     start_step = 0
 
     logger.info(f"cpu memory usage: {get_cpu_memory()}")
@@ -164,7 +171,8 @@ def main(config: DictConfig):
         except StopIteration:
             break
 
-    accelerator.end_training()
+    if not USE_CUDA:
+        tracker.accelerator.end_training()
 
 
 if __name__ == "__main__":
