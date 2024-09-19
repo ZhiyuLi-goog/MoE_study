@@ -91,4 +91,6 @@ def get_input_pipeline(config, tokenizer):
     return (
         MultiHostDataLoadIterator(train_loader, mesh),
         MultiHostDataLoadIterator(eval_loader, mesh),
+        None,
+        None,
     )
