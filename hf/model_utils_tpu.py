@@ -290,9 +290,14 @@ def setup_model_optimizer(config):
             model.parameters(), lr=config.lr
         )
 
-    # initialize optimizer states
+    # initialize optimizer states and scheduler
     optimizer = prime_optimizer(optimizer)
-    return model, ref_model, optimizer
+    scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer,
+        lr_lambda=lambda step: min(1.0, (step + 1) / (config.warmup_steps + 1)),
+    )
+
+    return model, ref_model, optimizer, scheduler
 
 
 def get_global_batch_size(per_device_batch_size):
