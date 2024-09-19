@@ -140,6 +140,10 @@ Remove `dry_run=True` for a true experiment.
 ```bash
 python run_dpo_no_trainer.py per_device_train_batch_size=1 optimizer=RMSprop report_metrics_freq=1 use_synthetic_data=False model.name_or_path=EleutherAI/pythia-2.8b datasets=hh max_steps=2600 eval_frequency=312 do_first_eval=True model.policy_dtype=float32 model.reference_dtype=float32 max_grad_norm=10.0 shuffle=True seed=4321 full_precision=True dry_run=True
 ```
+Or simply run the following command in a v5p-128 cluster:
+```
+python run_dpo_no_trainer.py +experiment=pythia28-hh
+```
 
 ### Mixtral8x22b
 ```bash
