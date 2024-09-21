@@ -67,9 +67,6 @@ eval_frequency: 3
 # num of process in data processing
 num_proc: 1
 
-# combine forward
-concatenated_forward: True
-
 # path to load checkpoint
 checkpoint_manager_path: null
 

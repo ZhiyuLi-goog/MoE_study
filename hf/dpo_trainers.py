@@ -95,41 +95,6 @@ def cross_entropy_loss(logits, labels, pad_token_id=0):
     return loss
 
 
-def forward(
-    model: nn.Module,
-    batch: Dict[str, Union[List, torch.LongTensor]],
-    label_pad_token_id: int = -100,
-    pad_token_id: int = 0,
-) -> Tuple[
-    torch.FloatTensor,
-    torch.FloatTensor,
-    torch.FloatTensor,
-    torch.FloatTensor,
-    torch.FloatTensor,
-]:
-    chosen_logits = model(
-        batch["chosen_input_ids"],
-        attention_mask=batch["chosen_attention_mask"],
-        use_cache=False,
-    ).logits.to(torch.float32)
-    rejected_logits = model(
-        batch["rejected_input_ids"],
-        attention_mask=batch["rejected_attention_mask"],
-        use_cache=False,
-    ).logits.to(torch.float32)
-    chosen_labels = batch["chosen_labels"].clone()
-    rejected_labels = batch["rejected_labels"].clone()
-
-    chosen_logps, size_completion = get_batch_logps(
-        chosen_logits, chosen_labels, label_pad_token_id=label_pad_token_id
-    )
-    rejected_logps, size_completion = get_batch_logps(
-        rejected_logits, rejected_labels, label_pad_token_id=label_pad_token_id
-    )
-    nll_loss = cross_entropy_loss(chosen_logits, chosen_labels, pad_token_id)
-    return (chosen_logps, rejected_logps, chosen_logits, rejected_logits, nll_loss)
-
-
 def create_concatenated_batch(batch: Dict[str, Union[List, torch.LongTensor]]):
     # all items in batch are the same in length
     concatenated_batch = {}
@@ -196,40 +161,22 @@ def get_batch_loss_metrics(
     """Compute the DPO loss and other metrics for the given batch of inputs for train or test."""
     metrics = {}
 
-    if config.concatenated_forward:
-        (
-            policy_chosen_logps,
-            policy_rejected_logps,
-            policy_chosen_logits,
-            policy_rejected_logits,
-            policy_chosen_logps_avg,
-        ) = concatenated_forward(model, batch, label_pad_token_id, pad_token_id)
-    else:
-        (
-            policy_chosen_logps,
-            policy_rejected_logps,
-            policy_chosen_logits,
-            policy_rejected_logits,
-            policy_chosen_logps_avg,
-        ) = forward(model, batch, label_pad_token_id, pad_token_id)
+    (
+        policy_chosen_logps,
+        policy_rejected_logps,
+        policy_chosen_logits,
+        policy_rejected_logits,
+        policy_chosen_logps_avg,
+    ) = concatenated_forward(model, batch, label_pad_token_id, pad_token_id)
 
     with torch.no_grad():
-        if config.concatenated_forward:
-            (
-                reference_chosen_logps,
-                reference_rejected_logps,
-                _,
-                _,
-                _,
-            ) = concatenated_forward(ref_model, batch, label_pad_token_id, pad_token_id)
-        else:
-            (
-                reference_chosen_logps,
-                reference_rejected_logps,
-                _,
-                _,
-                _,
-            ) = forward(ref_model, batch, label_pad_token_id, pad_token_id)
+        (
+            reference_chosen_logps,
+            reference_rejected_logps,
+            _,
+            _,
+            _,
+        ) = concatenated_forward(ref_model, batch, label_pad_token_id, pad_token_id)
 
     losses, chosen_rewards, rejected_rewards = dpo_loss(
         policy_chosen_logps,
