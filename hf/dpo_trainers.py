@@ -142,8 +142,11 @@ def concatenated_forward(
     # use torch.chunk to avoid copy, each chunk is a view of input tensor
     chosen_logits, rejected_logits = all_logits.chunk(2, axis=0)
     chosen_logps, rejected_logps = all_logps.chunk(2, axis=0)
+
+    # from https://arxiv.org/pdf/2404.19733
+    # Note that the NLL term is normalized by the total response length
     nll_loss = cross_entropy_loss(
-        chosen_logits, batch["chosen_input_ids"], pad_token_id
+        chosen_logits, batch["chosen_labels"], pad_token_id
     )
     return (chosen_logps, rejected_logps, chosen_logits, rejected_logits, nll_loss)
 
@@ -166,7 +169,7 @@ def get_batch_loss_metrics(
         policy_rejected_logps,
         policy_chosen_logits,
         policy_rejected_logits,
-        policy_chosen_logps_avg,
+        policy_chosen_nll_loss,
     ) = concatenated_forward(model, batch, label_pad_token_id, pad_token_id)
 
     with torch.no_grad():
@@ -207,6 +210,9 @@ def get_batch_loss_metrics(
     metrics[f"{prefix}logits/chosen_per_example"] = policy_chosen_logits.detach().mean()
     metrics[f"{prefix}losses_per_example"] = losses.detach().mean()
     metrics[f"{prefix}num_examples"] = num_examples
-    metrics[f"{prefix}ppl_per_token"] = torch.exp(policy_chosen_logps_avg.detach())
+    metrics[f"{prefix}ppl_per_token"] = torch.exp(policy_chosen_nll_loss.detach())
+
+    if config.aux_nll_loss_coef > 0:
+        losses += config.aux_nll_loss_coef * policy_chosen_nll_loss
 
     return losses.mean(), metrics

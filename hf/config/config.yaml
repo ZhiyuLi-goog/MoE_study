@@ -67,6 +67,10 @@ eval_frequency: 3
 # num of process in data processing
 num_proc: 1
 
+# https://arxiv.org/pdf/2404.19733
+# NLL loss scaling coefficient with Regularization
+aux_nll_loss_coef: 0
+
 # path to load checkpoint
 checkpoint_manager_path: null
 
