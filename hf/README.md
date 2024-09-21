@@ -49,10 +49,10 @@ gcloud compute tpus tpu-vm create ${TPU_NAME} --zone=${ZONE} --accelerator-type=
 
 
 ### ssh to TPU VMs and Run Workloads
-Pull docker image, say a pre-built image `gcr.io/cloud-tpu-multipod-dev/lizhiyu-pytorch-xla-moe-20240820`
+Pull docker image, say a pre-built image `gcr.io/cloud-tpu-multipod-dev/lizhiyu-pytorch-xla-moe-20240921`
 ```bash
 # change to a valid docker image
-export IMAGE=gcr.io/cloud-tpu-multipod-dev/lizhiyu-pytorch-xla-moe-20240908
+export IMAGE=gcr.io/cloud-tpu-multipod-dev/lizhiyu-pytorch-xla-moe-20240921
 
 gcloud compute tpus tpu-vm ssh ${TPU_NAME} \
 --worker=all \
