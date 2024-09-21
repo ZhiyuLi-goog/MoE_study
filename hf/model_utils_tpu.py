@@ -28,6 +28,7 @@ from transformers.trainer_pt_utils import (
 )
 from psutil import Process
 from transformers import AutoModelForCausalLM, AutoConfig
+from nemo.core.optim.lr_scheduler import CosineAnnealing, WarmupHoldPolicy
 
 
 logger = logging.get_logger(__name__)
@@ -292,10 +293,19 @@ def setup_model_optimizer(config):
 
     # initialize optimizer states and scheduler
     optimizer = prime_optimizer(optimizer)
-    scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optimizer,
-        lr_lambda=lambda step: min(1.0, (step + 1) / (config.warmup_steps + 1)),
-    )
+    sched_config = OmegaConf.to_container(config.sched, resolve=True)
+    scheduler_name = sched_config.pop("name")
+    if scheduler_name == "WarmupHoldPolicy":
+        scheduler = WarmupHoldPolicy(optimizer=optimizer, **sched_config)
+    elif scheduler_name == "CosineAnnealing":
+        assert (
+            config.lr >= sched_config.min_lr
+        ), f"{config.lr=} should be larger than {config.sched.min_lr=}"
+        scheduler = CosineAnnealing(optimizer=optimizer, **sched_config)
+    else:
+        raise ValueError(
+            f"{config.sched.name=} should be one of valid schedulers (WarmupHoldPolicy, CosineAnnealing)"
+        )
 
     return model, ref_model, optimizer, scheduler
 

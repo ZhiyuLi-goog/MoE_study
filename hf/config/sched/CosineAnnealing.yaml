@@ -1,0 +1,4 @@
+name: CosineAnnealing
+warmup_steps: 150
+min_lr: 9e-7
+max_steps: ${max_steps}

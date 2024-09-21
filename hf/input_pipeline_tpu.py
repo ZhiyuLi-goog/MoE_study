@@ -83,7 +83,9 @@ def get_input_pipeline(config, tokenizer):
             config, tokenizer, global_batch_size
         )
     else:
-        train_loader, eval_loader = get_dataloader(config, tokenizer, load_from_cache_file=True)
+        train_loader, eval_loader = get_dataloader(
+            config, tokenizer, load_from_cache_file=True
+        )
     if config.num_proc > 1:
         raise ValueError(
             f"{config.num_proc=}, which is bigger than 1. HuggingFace treats SPMD as a single-device program."

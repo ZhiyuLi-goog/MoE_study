@@ -122,10 +122,16 @@ def tokenize_row(
 
     # add EOS token to end of answer. Avoid adding if it's already there
     eos_token_id = tokenizer.eos_token_id
-    if len(chosen_tokens["input_ids"]) == 0 or eos_token_id != chosen_tokens["input_ids"][-1]:
+    if (
+        len(chosen_tokens["input_ids"]) == 0
+        or eos_token_id != chosen_tokens["input_ids"][-1]
+    ):
         chosen_tokens["input_ids"].append(eos_token_id)
         chosen_tokens["attention_mask"].append(1)
-    if len(rejected_tokens["input_ids"]) == 0 or eos_token_id != rejected_tokens["input_ids"][-1]:
+    if (
+        len(rejected_tokens["input_ids"]) == 0
+        or eos_token_id != rejected_tokens["input_ids"][-1]
+    ):
         rejected_tokens["input_ids"].append(eos_token_id)
         rejected_tokens["attention_mask"].append(1)
 

@@ -247,10 +247,16 @@ def get_batch_loss_metrics(
     metrics[f"{prefix}rewards/chosen_per_example"] = chosen_rewards.mean()
     metrics[f"{prefix}rewards/rejected_per_example"] = rejected_rewards.mean()
     metrics[f"{prefix}rewards/accuracies_per_example"] = reward_accuracies.mean()
-    metrics[f"{prefix}rewards/margins_per_example"] = (chosen_rewards - rejected_rewards).mean()
-    metrics[f"{prefix}logps/rejected_per_example"] = policy_rejected_logps.detach().mean()
+    metrics[f"{prefix}rewards/margins_per_example"] = (
+        chosen_rewards - rejected_rewards
+    ).mean()
+    metrics[f"{prefix}logps/rejected_per_example"] = (
+        policy_rejected_logps.detach().mean()
+    )
     metrics[f"{prefix}logps/chosen_per_example"] = policy_chosen_logps.detach().mean()
-    metrics[f"{prefix}logits/rejected_per_example"] = policy_rejected_logits.detach().mean()
+    metrics[f"{prefix}logits/rejected_per_example"] = (
+        policy_rejected_logits.detach().mean()
+    )
     metrics[f"{prefix}logits/chosen_per_example"] = policy_chosen_logits.detach().mean()
     metrics[f"{prefix}losses_per_example"] = losses.detach().mean()
     metrics[f"{prefix}num_examples"] = num_examples

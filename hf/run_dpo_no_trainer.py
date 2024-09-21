@@ -13,7 +13,7 @@ from utils import get_cpu_memory, print_batch
 from dpo_trainers import get_batch_loss_metrics
 from file_utils import get_file
 
-USE_CUDA = torch.cuda.is_available() #os.environ.get('USE_CUDA', False)
+USE_CUDA = torch.cuda.is_available()  # os.environ.get('USE_CUDA', False)
 assert USE_CUDA == False, "CUDA not supported"
 if not USE_CUDA:
     from model_utils_tpu import (
@@ -31,7 +31,7 @@ if not USE_CUDA:
     )
     OmegaConf.register_new_resolver(
         "path_join", lambda output_dir, exp_name: os.path.join(output_dir, exp_name)
-    )    
+    )
 
 
 logger = logging.get_logger(__name__)
@@ -103,17 +103,21 @@ def eval_fn(model, ref_model, eval_device_loader, config, step, tracker):
         else:
             group_eval_metrics[k] = sum(v) / len(v)
 
-    group_eval_metrics[f"{prefix}trained_num_examples"] = step * config.global_train_batch_size
-    tracker.record_eval_step(
-        group_eval_metrics, step * config.global_train_batch_size
+    group_eval_metrics[f"{prefix}trained_num_examples"] = (
+        step * config.global_train_batch_size
     )
+    tracker.record_eval_step(group_eval_metrics, step * config.global_train_batch_size)
 
 
 def hydra_decorator(config_path, config_name):
     def decorator(func):
         if not USE_CUDA:
-            return hydra.main(version_base=None, config_path=config_path, config_name=config_name)(func)
+            return hydra.main(
+                version_base=None, config_path=config_path, config_name=config_name
+            )(func)
+
     return decorator
+
 
 @hydra_decorator(config_path="config", config_name="config")
 def main(config: DictConfig):
@@ -139,7 +143,9 @@ def main(config: DictConfig):
         logger.warning(
             f"Found mismatch between {tokenizer.vocab_size=} and {model.config.vocab_size}"
         )
-    train_device_loader, eval_device_loader, train_ds, _ = get_input_pipeline(config, tokenizer)
+    train_device_loader, eval_device_loader, train_ds, _ = get_input_pipeline(
+        config, tokenizer
+    )
 
     start_step = 0
 
@@ -152,7 +158,9 @@ def main(config: DictConfig):
             or step > start_step
             and step % config.eval_frequency == 0
         ):
-            eval_metrics = eval_fn(model, ref_model, eval_device_loader, config, step, tracker)
+            eval_metrics = eval_fn(
+                model, ref_model, eval_device_loader, config, step, tracker
+            )
         try:
             train_metrics = train_step(
                 model,

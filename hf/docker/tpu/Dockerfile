@@ -33,6 +33,9 @@ RUN pip install sentencepiece
 # checkpoint loading in gcs
 RUN pip install gcsfs
 
+# import schedulers from nemo
+RUN pip install nemo_toolkit pytorch-lightning huggingface-hub==0.23.2
+
 WORKDIR /app
 
 # clone current repo
