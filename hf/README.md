@@ -49,10 +49,10 @@ gcloud compute tpus tpu-vm create ${TPU_NAME} --zone=${ZONE} --accelerator-type=
 
 
 ### ssh to TPU VMs and Run Workloads
-Pull docker image, say a pre-built image `gcr.io/cloud-tpu-multipod-dev/lizhiyu-pytorch-xla-moe-20240921`
+Pull docker image, say a pre-built image `gcr.io/cloud-tpu-multipod-dev/lizhiyu-pytorch-xla-moe-20240924`
 ```bash
 # change to a valid docker image
-export IMAGE=gcr.io/cloud-tpu-multipod-dev/lizhiyu-pytorch-xla-moe-20240921
+export IMAGE=gcr.io/cloud-tpu-multipod-dev/lizhiyu-pytorch-xla-moe-20240924
 
 gcloud compute tpus tpu-vm ssh ${TPU_NAME} \
 --worker=all \
@@ -148,4 +148,13 @@ python run_dpo_no_trainer.py +experiment=pythia28-hh
 ### Mixtral8x22b
 ```bash
 python run_dpo_no_trainer.py model.config_path=mixtral822.json per_device_train_batch_size=1 optimizer=RMSprop checkpoint_manager_path=gs://lizhiyu-multipods-eu-west/moe/checkpoints-20240803/mixtral822/ report_metrics_freq=1 use_synthetic_data=False model.name_or_path=mistralai/Mixtral-8x22B-v0.1 datasets=hh max_steps=2600 eval_frequency=312 do_first_eval=True model.policy_dtype=float32 model.reference_dtype=bfloat16 max_grad_norm=10.0 seed=4321
+```
+
+#### Dropped Implementation
+By default, the mixtral models (both policy and reference) use [naive for-loop dropless implementation](https://github.com/pytorch-tpu/transformers/blob/c11467e6d84481515cbe2779fddf38883b1713e9/src/transformers/models/mixtral/modeling_mixtral.py#L976-L993).  
+We support activating dropped implementation by assigning a valid `capacity_factor` like `model.capacity_factor=1.25` with an empirically effective range between 1 and 2.  
+Follwing the idea of [switch transformer](https://arxiv.org/pdf/2101.03961), the dropped implementation is close to [that in MaxText](https://github.com/google/maxtext/blob/5af84912f4d11f356ea9929950faa7c50b12ae85/MaxText/layers/linears.py#L433). We take reference to the implementation of [Switch Transformer](https://github.com/huggingface/transformers/blob/v4.44.2/src/transformers/models/switch_transformers/modeling_switch_transformers.py#L201-L207) including reusing `hidden_states` from the previous layer for tokens that are dropped and not assigned to any expert. The difference is that the Switch Transformer implementation uses top-1 selection, while this implementation supports top-k, making it more general.
+See [the testing for better understanding](https://github.com/pytorch-tpu/transformers/blob/c11467e6d84481515cbe2779fddf38883b1713e9/src/transformers/models/mixtral/token_dropping_test.py#L93-L101)
+```
+python run_dpo_no_trainer.py model.config_path=mixtral80.json max_length=4096 per_device_train_batch_size=1 model.capacity_factor=1.25
 ```

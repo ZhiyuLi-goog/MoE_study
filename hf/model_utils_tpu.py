@@ -199,6 +199,7 @@ def setup_model_optimizer(config):
         model_config.flash_attention = config.model.flash_attention
         model_config.gmm = False
         model_config.gmm_stack = False
+        model_config.capacity_factor = config.model.capacity_factor
         with torch.device("meta"):
             model = (
                 AutoModelForCausalLM.from_config(model_config)
