@@ -1,12 +1,11 @@
 import torch
 import os
 import hydra
-from omegaconf import OmegaConf, DictConfig
-from transformers import AutoTokenizer, Trainer, TrainingArguments, default_data_collator
+from omegaconf import OmegaConf, DictConfig, open_dict
+from transformers import AutoTokenizer, TrainingArguments, default_data_collator
 
 import numpy as np
 
-from transformers import logging
 from pdb import set_trace
 
 from transformers import set_seed
@@ -15,8 +14,10 @@ from mlperf_logging_utils import ClmLogger, MLPerfCallback
 
 from clm_datasets import get_datasets, process_datasets
 USE_CUDA = torch.cuda.is_available()  # os.environ.get('USE_CUDA', False)
-assert USE_CUDA == False, "CUDA not supported"
+
 if not USE_CUDA:
+    from transformers import Trainer, logging
+
     from model_utils_tpu import (
         setup_xla,
         setup_model_optimizer,
@@ -33,8 +34,31 @@ if not USE_CUDA:
         "path_join", lambda output_dir, exp_name: os.path.join(output_dir, exp_name)
     )
 
+    logger = logging.get_logger(__name__)
+else:
+    import torch.multiprocessing as mp
+    from nemo.core.config import hydra_runner
+    from nemo_aligner.utils.train_script_utils import (
+        CustomLoggerWrapper,
+        add_custom_checkpoint_callback,
+        init_using_ptl,
+        extract_optimizer_scheduler_from_ptl_model
+    )
+    from model_utils_gpu import (
+        setup_distributed,
+        setup_model_optimizer,
+        Tracker,
+    )
+    from input_pipeline_gpu import (
+        get_input_pipeline,
+    )
+    from trainer_utils_gpu import Trainer
+    from nemo_aligner.utils.distributed import Timer
 
-logger = logging.get_logger(__name__)
+    OmegaConf.register_new_resolver("multiply", lambda x, y: x * y, replace=True)
+    OmegaConf.register_new_resolver("int_div", lambda x, y: x // y, replace=True)
+
+    mp.set_start_method("spawn", force=True)
 
 
 def hydra_decorator(config_path, config_name):
@@ -43,16 +67,23 @@ def hydra_decorator(config_path, config_name):
             return hydra.main(
                 version_base=None, config_path=config_path, config_name=config_name
             )(func)
+        else:
+            return hydra_runner(config_path=config_path, config_name=config_name)(func)
 
     return decorator
 
 
 @hydra_decorator(config_path="config", config_name="config")
 def main(config: DictConfig):
+    if USE_CUDA:
+        from nemo.utils import logging as logger
+
     OmegaConf.resolve(config)
     set_seed(config.seed)
     logger.info("\n\n************** Experiment configuration ***********")
     logger.info(OmegaConf.to_yaml(config))
+    if USE_CUDA:
+        setup_distributed(config)
 
     trainer_args = TrainingArguments(
         output_dir=config.run_dir,
@@ -87,15 +118,37 @@ def main(config: DictConfig):
         tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
         model, optimizer, scheduler = setup_model_optimizer(config)
 
-    if tokenizer.vocab_size != model.config.vocab_size:
-        logger.warning(
-            f"Found mismatch between {tokenizer.vocab_size=} and {model.config.vocab_size}"
-        )
-    
+        if tokenizer.vocab_size != model.config.vocab_size:
+            logger.warning(
+                f"Found mismatch between {tokenizer.vocab_size=} and {model.config.vocab_size}"
+            )
+    else:
+        from nemo.utils.exp_manager import exp_manager
+        from nemo_aligner.utils.train_script_utils import resolve_and_create_trainer
+
+        megatron_trainer = resolve_and_create_trainer(config, "sft")
+        exp_manager(megatron_trainer, config.exp_manager)
+
+        with open_dict(config):
+            config.model.precision = config.trainer.precision
+
+        model, _, _ = setup_model_optimizer(config, megatron_trainer)
+        tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
+
+        with open_dict(config):
+            # overwrite the model config with the config from the checkpoint
+            config.model.encoder_seq_length = model.cfg.encoder_seq_length
+   
     raw_datasets = get_datasets(config)
     datasets = process_datasets(raw_datasets, tokenizer, config)
     logger.info(f"{datasets=}")
     train_dataset, eval_dataset = datasets['train'], datasets['validation']
+    if USE_CUDA:
+        train_dataset, eval_dataset, train_ds, _ = get_input_pipeline(config, train_dataset, eval_dataset, tokenizer, model.tokenizer)
+        tokenizer = model.tokenizer
+        # initialize optimizer states
+        init_using_ptl(megatron_trainer, model, train_dataset, train_ds)
+        optimizer, scheduler = extract_optimizer_scheduler_from_ptl_model(model)
 
     clmlogger = ClmLogger(target_eval_loss=0)
 
@@ -135,6 +188,16 @@ def main(config: DictConfig):
         data_collator=default_data_collator,
         callbacks=[MLPerfCallback(clmlogger, len(train_dataset), len(eval_dataset))],
     )
+    if USE_CUDA:
+        ckpt_callback = add_custom_checkpoint_callback(megatron_trainer, model)
+        timer = Timer(config.exp_manager.get("max_time_per_run"))
+
+        trainer.setup(
+            cfg=config.trainer.sft,
+            logger=CustomLoggerWrapper(megatron_trainer.loggers),
+            ckpt_callback=ckpt_callback,
+            run_timer=timer,
+        )
 
     trainer.train()
 
