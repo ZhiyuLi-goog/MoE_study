@@ -72,6 +72,8 @@ def main(config: DictConfig):
         seed=config.seed,
         dataloader_drop_last=True,
         remove_unused_columns=False,
+        prediction_loss_only=True,
+        label_names=["labels"],
     )
 
     if not USE_CUDA:
@@ -131,7 +133,7 @@ def main(config: DictConfig):
         eval_dataset=eval_dataset,
         optimizers=[optimizer, scheduler],
         # Data collator will default to DataCollatorWithPadding, so we change it.
-        compute_metrics=compute_metrics,
+        compute_metrics=None,
         data_collator=default_data_collator,
         callbacks=[MLPerfCallback(clmlogger, len(train_dataset), len(eval_dataset))],
     )
