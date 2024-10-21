@@ -9,7 +9,11 @@ from transformers import (
     TrainerControl,
     TrainerState,
     TrainingArguments,
+    is_torch_xla_available,
 )
+
+if is_torch_xla_available():
+    import torch_xla.runtime as xr
 
 
 def is_dist_avail_and_initialized():
@@ -61,22 +65,29 @@ class MLPerfCallback(TrainerCallback):
         super().__init__()
         self.mllogger = logger
         self.submission_info = {
-            "submission_benchmark": "llama2_70b_lora",
+            "submission_benchmark": "mixture-of-expert",  # TODO change task name
             "submission_division": "closed",
-            "submission_org": "referece",
-            "submission_platform": "referece",
-            "submission_poc_name": "referece",
-            "submission_poc_email": "referece",
-            "submission_status": "onprem",
+            "submission_org": "Google",
+            "submission_platform": "reference",
+            "submission_status": "reference",
             "train_dataset_length": train_dataset_length,
             "eval_dataset_length": eval_dataset_length,
         }
-
-    def on_train_begin(self, args, state, control, **kwargs):
-        self.gbs=int(args.per_device_train_batch_size * args.gradient_accumulation_steps * int(os.getenv("WORLD_SIZE", 1)))
         self.mllogger.event(
             key=constants.CACHE_CLEAR, value="True",
         )
+        self.mllogger.start(key=constants.INIT_START, value="")
+
+    def on_train_begin(self, args, state, control, **kwargs):
+        if torch.cuda.is_available():
+            num_devices = int(os.getenv("WORLD_SIZE", 1))
+        elif is_torch_xla_available():
+            num_devices = xr.global_runtime_device_count()
+        else:
+            raise ValueError("The pipeline should be either cuda or xla backend.")
+
+        self.global_batch_size=int(args.per_device_train_batch_size * args.gradient_accumulation_steps * num_devices)
+
         self.mllogger.event(
             key=constants.SUBMISSION_BENCHMARK,
             value=self.submission_info["submission_benchmark"],
@@ -93,20 +104,12 @@ class MLPerfCallback(TrainerCallback):
             value=self.submission_info["submission_platform"],
         )
         self.mllogger.event(
-            key=constants.SUBMISSION_POC_NAME,
-            value=self.submission_info["submission_poc_name"],
-        )
-        self.mllogger.event(
-            key=constants.SUBMISSION_POC_EMAIL,
-            value=self.submission_info["submission_poc_email"],
-        )
-        self.mllogger.event(
             key=constants.SUBMISSION_STATUS,
             value=self.submission_info["submission_status"],
         )
         self.mllogger.event(
             key=constants.GLOBAL_BATCH_SIZE,
-            value=self.gbs,
+            value=self.global_batch_size,
         )
         self.mllogger.event(
             key=constants.TRAIN_SAMPLES,
@@ -123,7 +126,6 @@ class MLPerfCallback(TrainerCallback):
         self.mllogger.event(key=constants.OPT_GRADIENT_CLIP_NORM, value=args.max_grad_norm)
         self.mllogger.event(key=constants.OPT_BASE_LR, value=args.learning_rate)
         self.mllogger.event(key=constants.GRADIENT_ACCUMULATION_STEPS, value=args.gradient_accumulation_steps)
-        self.mllogger.start(key=constants.INIT_START, value="")
         # device warmup should be done here
         self.mllogger.end(key=constants.INIT_STOP, value="")
         self.mllogger.start(constants.RUN_START, value="")
@@ -139,7 +141,6 @@ class MLPerfCallback(TrainerCallback):
         Event called at the beginning of a training step. If using gradient accumulation, one training step might take
         several inputs.
         """
-        print(f"{state.log_history=}")
         if (
             state.global_step % (state.logging_steps) == 0
             and state.global_step > 0
@@ -148,7 +149,7 @@ class MLPerfCallback(TrainerCallback):
             self.mllogger.event(
                 "train_loss",
                 value=state.log_history[-1]["loss"] if state.log_history else -1,
-                metadata={"samples_count": state.log_history[-1]["step"]*self.gbs if state.log_history else -1},
+                metadata={"samples_count": state.log_history[-1]["step"]*self.global_batch_size if state.log_history else -1},
             )
             control.should_log = True
 
@@ -156,12 +157,12 @@ class MLPerfCallback(TrainerCallback):
             self.mllogger.end(
                 constants.BLOCK_STOP,
                 value="",
-                metadata={"samples_count": state.log_history[-1]["step"]*self.gbs},
+                metadata={"samples_count": state.log_history[-1]["step"]*self.global_batch_size},
             )
             self.mllogger.event(
                 constants.EVAL_ACCURACY,
                 value=state.log_history[-1]["eval_loss"],
-                metadata={"samples_count": state.log_history[-1]["step"]*self.gbs},
+                metadata={"samples_count": state.log_history[-1]["step"]*self.global_batch_size},
             )
             self.mllogger.start(
                 constants.BLOCK_START,
@@ -178,7 +179,7 @@ class MLPerfCallback(TrainerCallback):
                 constants.RUN_STOP,
                 value=eval_loss_list[-1],
                 metadata={
-                    "samples_count": state.log_history[-1]["step"]*self.gbs,
+                    "samples_count": state.log_history[-1]["step"]*self.global_batch_size,
                     "status": "success",
                 },
             )
@@ -187,7 +188,7 @@ class MLPerfCallback(TrainerCallback):
             self.mllogger.end(
                 constants.RUN_STOP,
                 value=eval_loss_list[-1],
-                metadata={"samples_count": state.log_history[-1]["step"]*self.gbs, "status": "fail"},
+                metadata={"samples_count": state.log_history[-1]["step"]*self.global_batch_size, "status": "fail"},
             )
 
         return control

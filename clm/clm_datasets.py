@@ -1,4 +1,4 @@
-from datasets import load_dataset
+from datasets import load_dataset, Features, Value
 from transformers.testing_utils import CaptureLogger
 import transformers
 from itertools import chain
@@ -6,13 +6,32 @@ from itertools import chain
 
 def get_datasets(config):
     # Downloading and loading a dataset from the hub.
-    raw_datasets = load_dataset(
-        config.dataset.dataset_name,
-        config.dataset.dataset_config_name,
-        cache_dir=config.cache_local_dir,
-        streaming=config.dataset.streaming,
-    )
-
+    if config.dataset.dataset_name == "c4_mlperf":
+        data_files = {
+            "train": [f"hf://datasets/allenai/c4/en/c4-train.{i:05d}-of-01024.json.gz" for i in range(768, 1024)],
+            "validation": [f"hf://datasets/allenai/c4/en/c4-validation.{i:05d}-of-00008.json.gz" for i in range(1)],  # TODO change
+        }
+        features = Features(
+            {
+                'text': Value(dtype='string', id=None),
+                'timestamp': Value(dtype='string', id=None),
+                'url': Value(dtype='string', id=None),
+            }
+        )
+        raw_datasets = load_dataset(
+            "json",
+            data_files=data_files,
+            features=features,
+            cache_dir=config.cache_local_dir,
+            streaming=config.dataset.streaming,
+        )
+    else:
+        raw_datasets = load_dataset(
+            config.dataset.dataset_name,
+            config.dataset.dataset_config_name,
+            cache_dir=config.cache_local_dir,
+            streaming=config.dataset.streaming,
+        )
     return raw_datasets
 
 
