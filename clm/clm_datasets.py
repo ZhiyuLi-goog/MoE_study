@@ -8,8 +8,8 @@ def get_datasets(config):
     # Downloading and loading a dataset from the hub.
     if config.dataset.dataset_name == "c4_mlperf":
         data_files = {
-            "train": [f"hf://datasets/allenai/c4/en/c4-train.{i:05d}-of-01024.json.gz" for i in range(768, 1024)],
-            "validation": [f"hf://datasets/allenai/c4/en/c4-validation.{i:05d}-of-00008.json.gz" for i in range(1)],  # TODO change
+            "train": [f"gs://mlperf-llm-public2/c4/en_json/3.0.1/c4-train.{i:05d}-of-01024.json" for i in range(768, 1024)],
+            "validation": ["gs://mlperf-llm-public2/c4/en_val_subset_json/c4-validation_24567exp.json"],
         }
         features = Features(
             {
@@ -18,13 +18,24 @@ def get_datasets(config):
                 'url': Value(dtype='string', id=None),
             }
         )
-        raw_datasets = load_dataset(
+        raw_datasets = {}
+        raw_datasets['train'] = load_dataset(
             "json",
-            data_files=data_files,
+            data_files=data_files['train'],
             features=features,
             cache_dir=config.cache_local_dir,
             streaming=config.dataset.streaming,
+            split='train',
+        ).shuffle(seed=42, buffer_size=10_000)
+        raw_datasets['validation'] = load_dataset(
+            "json",
+            data_files=data_files['validation'],
+            features=features,
+            cache_dir=config.cache_local_dir,
+            split='train',
         )
+        if config.dry_run:
+            raw_datasets['validation'] = raw_datasets["validation"].select(range(100))
     else:
         raw_datasets = load_dataset(
             config.dataset.dataset_name,
@@ -64,10 +75,19 @@ def process_datasets(raw_datasets, tokenizer, config):
             desc="Running tokenizer on dataset",
         )
     else:
-        tokenized_datasets = raw_datasets.map(
+        tokenized_datasets = {}
+        tokenized_datasets['train'] = raw_datasets['train'].map(
             tokenize_function,
             batched=True,
             remove_columns=column_names,
+        )
+        tokenized_datasets['validation'] = raw_datasets['validation'].map(
+            tokenize_function,
+            batched=True,
+            num_proc=config.dataset.num_proc,
+            remove_columns=column_names,
+            load_from_cache_file=config.dataset.load_from_cache_file,
+            desc="Running tokenizer on dataset",
         )
     
     block_size = config.max_length
@@ -96,14 +116,16 @@ def process_datasets(raw_datasets, tokenizer, config):
             desc=f"Grouping texts in chunks of {block_size}",
         )
     else:
-        lm_datasets = tokenized_datasets.map(
+        lm_datasets = {}
+        lm_datasets['train'] = tokenized_datasets['train'].map(
             group_texts,
             batched=True,
         )
-    
+        lm_datasets['validation'] = tokenized_datasets['validation'].map(
+            group_texts,
+            batched=True,
+            num_proc=config.dataset.num_proc,
+            load_from_cache_file=config.dataset.load_from_cache_file,
+            desc=f"Grouping texts in chunks of {block_size}",
+        )
     return lm_datasets
-    
-        
-
-
-
