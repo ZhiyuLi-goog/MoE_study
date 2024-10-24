@@ -1,37 +1,39 @@
-from datasets import load_dataset, Features, Value
+from datasets import Dataset, load_dataset, concatenate_datasets
 from transformers.testing_utils import CaptureLogger
+from functools import partial
 import transformers
 from itertools import chain
 
 
 def get_datasets(config):
     # Downloading and loading a dataset from the hub.
-    if config.dataset.dataset_name == "c4_mlperf":
-        data_files = {
-            "train": [f"hf://datasets/allenai/c4/en/c4-train.{i:05d}-of-01024.json.gz" for i in range(768, 1024)],
-            "validation": [f"hf://datasets/allenai/c4/en/c4-validation.{i:05d}-of-00008.json.gz" for i in range(1)],  # TODO change
-        }
-        features = Features(
-            {
-                'text': Value(dtype='string', id=None),
-                'timestamp': Value(dtype='string', id=None),
-                'url': Value(dtype='string', id=None),
-            }
-        )
-        raw_datasets = load_dataset(
-            "json",
-            data_files=data_files,
-            features=features,
-            cache_dir=config.cache_local_dir,
-            streaming=config.dataset.streaming,
-        )
-    else:
-        raw_datasets = load_dataset(
-            config.dataset.dataset_name,
-            config.dataset.dataset_config_name,
-            cache_dir=config.cache_local_dir,
-            streaming=config.dataset.streaming,
-        )
+    raw_datasets = load_dataset(
+        config.dataset.dataset_name,
+        config.dataset.dataset_config_name,
+        cache_dir=config.cache_local_dir,
+        streaming=config.dataset.streaming,
+    )
+
+    def shuffled_dataset_in_chunks(iterable_dataset_dict, field, buffer_size=1000, step_size=1000, seed=42):
+        def to_dataset(iterable_ds):
+            def gen_from_iterable_dataset():
+                yield from iterable_ds
+            return Dataset.from_generator(partial(gen_from_iterable_dataset), features=iterable_ds.features)
+
+        iterable_dataset = iterable_dataset_dict[field]
+        shuffled_chunks = []
+        iterable_dataset_len = iterable_dataset.info.splits[field].num_examples
+        cap = iterable_dataset_len // buffer_size + 1
+        for i in range(0, cap, step_size):
+            print(i, "/", cap)
+            chunk = iterable_dataset.shuffle(seed=seed + i, buffer_size=buffer_size).take(buffer_size)
+            shuffled_chunks.append(to_dataset(chunk))
+        return concatenate_datasets(shuffled_chunks).shuffle(seed=seed)
+
+    # Create a shuffled Dataset
+    raw_datasets["train"] = shuffled_dataset_in_chunks(raw_datasets, "train")
+    raw_datasets["validation"] = shuffled_dataset_in_chunks(raw_datasets, "validation")
+
     return raw_datasets
 
 
@@ -102,8 +104,3 @@ def process_datasets(raw_datasets, tokenizer, config):
         )
     
     return lm_datasets
-    
-        
-
-
-
