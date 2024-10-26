@@ -250,9 +250,9 @@ def setup_model_optimizer(config):
         if config.model.config_path:
             model.apply(model._init_weights)
     
-    n_params = sum({p.data_ptr(): p.numel() for p in model.parameters()}.values())
+    n_params = sum({name: p.numel() for name, p in model.named_parameters()}.values())
     logger.info(f"Total size={n_params/1e9:.3f}B params")
-    n_active_params = sum({p.data_ptr(): p.numel() for p in model.parameters() if p.requires_grad}.values())
+    n_active_params = sum({name: p.numel() for name, p in model.named_parameters() if p.requires_grad}.values())
     logger.info(f"Active size={n_active_params/1e9:.3f}B params")
 
     if config.optimizer == "ADAMW_TORCH_XLA":
