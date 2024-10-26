@@ -7,6 +7,7 @@ import torch_xla.core.xla_model as xm
 import torch_xla.runtime as xr
 import torch_xla.distributed.spmd as xs
 from transformers import logging
+from transformers.integrations import TensorBoardCallback
 from torch_xla.experimental.distributed_checkpoint import (
     CheckpointManager,
     prime_optimizer,
@@ -27,8 +28,9 @@ from transformers.trainer_pt_utils import (
     get_module_class_from_name,
 )
 from psutil import Process
-from transformers import AutoModelForCausalLM, AutoConfig
+from transformers import AutoModelForCausalLM, AutoConfig, TrainerCallback
 from nemo.core.optim.lr_scheduler import CosineAnnealing, WarmupHoldPolicy
+import json
 
 
 logger = logging.get_logger(__name__)
@@ -340,3 +342,28 @@ class Tracker:
 
     def record_eval_step(self, metrics, num_examples):
         xm.add_step_closure(self.report_eval_metrics, args=(num_examples, metrics))
+
+# class Tensorboard
+class MyTensorBoardCallback(TensorBoardCallback):
+    def __init__(self, config):
+
+        exp_config = {}
+        for k, v in flatten(OmegaConf.to_container(config)).items():
+            if isinstance(v, (str, int, float, str, bool, torch.Tensor)):
+                exp_config[k] = v
+            else:
+                exp_config[k] = str(v)
+        try:
+            from torch.utils.tensorboard import SummaryWriter  # noqa: F401
+            self._SummaryWriter = SummaryWriter
+        except ImportError:
+            try:
+                from tensorboardX import SummaryWriter
+
+                self._SummaryWriter = SummaryWriter
+            except ImportError:
+                self._SummaryWriter = None
+
+        super()._init_summary_writer(None, log_dir=config.run_dir)
+        super().__init__(tb_writer=self.tb_writer)
+        self.tb_writer.add_text("model_config", json.dumps(exp_config, indent=2))

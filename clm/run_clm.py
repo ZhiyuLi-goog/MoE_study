@@ -22,6 +22,7 @@ if not USE_CUDA:
         setup_model_optimizer,
         get_global_batch_size,
         Tracker,
+        MyTensorBoardCallback,
     )
     from accelerate import Accelerator
 
@@ -136,7 +137,7 @@ def main(config: DictConfig):
         compute_metrics=None,
         data_collator=default_data_collator,
         # callbacks=[MLPerfCallback(clmlogger, len(train_dataset), len(eval_dataset))],
-        callbacks=[MLPerfCallback(clmlogger, 100, 10)],
+        callbacks=[MLPerfCallback(clmlogger, 100, 10), MyTensorBoardCallback(config)],
     )
 
     trainer.train()
