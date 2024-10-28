@@ -57,8 +57,8 @@ def main(config: DictConfig):
 
     trainer_args = TrainingArguments(
         output_dir=config.run_dir,
-        per_device_train_batch_size=config.per_device_train_batch_size,
-        per_device_eval_batch_size=config.per_device_eval_batch_size,
+        per_device_train_batch_size=config.global_train_batch_size,
+        per_device_eval_batch_size=config.global_eval_batch_size,
         gradient_accumulation_steps=config.gradient_accumulation_steps,
         max_grad_norm=config.max_grad_norm,
         num_train_epochs=1,
