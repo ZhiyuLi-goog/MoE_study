@@ -10,6 +10,9 @@ workload:
 
   torchDistributedTarget: "run_clm.py"
 
+  # HuggingFace tokens (EDIT THIS)
+  hfToken: "<hf_xxxxxxxxxxxxxxxxxxxxxxxxxxx>"
+
   # It will be mounted to /nfs on container startup using GCS fuse (EDIT THIS)
   gcsBucketForDataCataPath: <bucket_name>
 
