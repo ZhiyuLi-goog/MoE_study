@@ -44,4 +44,9 @@ RUN pip install "git+https://github.com/mlperf/logging.git"
 # checkpoint loading in gcs
 RUN pip install gcsfs
 
-COPY *.py /app/
+# clone current repo
+ARG GIT_REF=main
+RUN git clone https://github.com/ZhiyuLi-goog/MoE_study.git && \
+    cd MoE_study && \
+    echo GIT_REF=${GIT_REF} && \
+    git checkout ${GIT_REF}
