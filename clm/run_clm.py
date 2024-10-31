@@ -75,7 +75,7 @@ def main(config: DictConfig):
         remove_unused_columns=False,
         prediction_loss_only=True,
         label_names=["labels"],
-        optim="Adam",
+        optim="adamw_torch_xla",
     )
 
     if not USE_CUDA:
