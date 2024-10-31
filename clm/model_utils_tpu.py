@@ -265,7 +265,7 @@ def setup_model_optimizer(config):
         )
 
     # initialize optimizer states and scheduler
-    # optimizer = prime_optimizer(optimizer)
+    optimizer = prime_optimizer(optimizer)
     sched_config = OmegaConf.to_container(config.sched, resolve=True)
     scheduler_name = sched_config.pop("name")
     if scheduler_name == "WarmupHoldPolicy":
