@@ -57,6 +57,7 @@ def main(config: DictConfig):
 
     trainer_args = TrainingArguments(
         output_dir=config.run_dir,
+        do_train=True,
         per_device_train_batch_size=config.global_train_batch_size,
         per_device_eval_batch_size=config.global_eval_batch_size,
         gradient_accumulation_steps=config.gradient_accumulation_steps,
@@ -65,6 +66,7 @@ def main(config: DictConfig):
         evaluation_strategy="steps",
         save_strategy="no",
         max_steps=config.max_steps,
+        do_eval=False,
         eval_steps=config.eval_frequency,
         eval_delay=0,
         logging_strategy="no",
@@ -75,8 +77,12 @@ def main(config: DictConfig):
         remove_unused_columns=False,
         prediction_loss_only=True,
         label_names=["labels"],
-        optim="adamw_torch_xla",
+        fsdp=True,
+        optim='adamw_torch_xla',
+        fsdp_config=OmegaConf.to_container(config.model.fsdp_config),
     )
+    trainer_args.__post_init__()
+    logger.info(f"{trainer_args=}")
 
     if not USE_CUDA:
         config_path = os.path.join(config.run_dir, "config.yaml")
