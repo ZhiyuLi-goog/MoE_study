@@ -256,32 +256,33 @@ def setup_model_optimizer(config):
     n_active_params = sum({name: p.numel() for name, p in model.named_parameters() if p.requires_grad}.values())
     logger.info(f"Active size={n_active_params/1e9:.3f}B params")
 
-    if config.optimizer == "ADAMW_TORCH_XLA":
-        from torch_xla.amp.syncfree import AdamW
+    # if config.optimizer == "ADAMW_TORCH_XLA":
+    #     from torch_xla.amp.syncfree import AdamW
 
-        optimizer = AdamW(model.parameters(), lr=config.lr)
-    else:
-        optimizer = getattr(torch.optim, config.optimizer)(
-            model.parameters(), lr=config.lr
-        )
+    #     optimizer = AdamW(model.parameters(), lr=config.lr)
+    # else:
+    #     optimizer = getattr(torch.optim, config.optimizer)(
+    #         model.parameters(), lr=config.lr
+    #     )
 
-    # initialize optimizer states and scheduler
-    optimizer = prime_optimizer(optimizer)
-    sched_config = OmegaConf.to_container(config.sched, resolve=True)
-    scheduler_name = sched_config.pop("name")
-    if scheduler_name == "WarmupHoldPolicy":
-        scheduler = WarmupHoldPolicy(optimizer=optimizer, **sched_config)
-    elif scheduler_name == "CosineAnnealing":
-        assert (
-            config.lr >= sched_config.min_lr
-        ), f"{config.lr=} should be larger than {config.sched.min_lr=}"
-        scheduler = CosineAnnealing(optimizer=optimizer, **sched_config)
-    else:
-        raise ValueError(
-            f"{config.sched.name=} should be one of valid schedulers (WarmupHoldPolicy, CosineAnnealing)"
-        )
+    # # initialize optimizer states and scheduler
+    # # optimizer = prime_optimizer(optimizer)
+    # sched_config = OmegaConf.to_container(config.sched, resolve=True)
+    # scheduler_name = sched_config.pop("name")
+    # if scheduler_name == "WarmupHoldPolicy":
+    #     scheduler = WarmupHoldPolicy(optimizer=optimizer, **sched_config)
+    # elif scheduler_name == "CosineAnnealing":
+    #     assert (
+    #         config.lr >= sched_config.min_lr
+    #     ), f"{config.lr=} should be larger than {config.sched.min_lr=}"
+    #     scheduler = CosineAnnealing(optimizer=optimizer, **sched_config)
+    # else:
+    #     raise ValueError(
+    #         f"{config.sched.name=} should be one of valid schedulers (WarmupHoldPolicy, CosineAnnealing)"
+    #     )
 
-    return model, optimizer, scheduler
+    # logger.info(f"end of init: cpu memory usage: {get_cpu_memory()}")
+    return model, None, None
 
 
 def get_global_batch_size(per_device_batch_size):

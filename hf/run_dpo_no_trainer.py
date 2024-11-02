@@ -179,6 +179,7 @@ def main(config: DictConfig):
                 )
         except StopIteration:
             break
+        logger.info(f"cpu memory usage: {get_cpu_memory()}")
 
     if not USE_CUDA:
         tracker.accelerator.end_training()
