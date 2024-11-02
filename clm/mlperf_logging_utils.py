@@ -4,6 +4,7 @@ import torch
 import torch.distributed as dist
 from mlperf_logging import mllog
 from mlperf_logging.mllog import constants
+from model_utils_tpu import get_cpu_memory, logger
 from transformers import (
     TrainerCallback,
     TrainerControl,
@@ -141,6 +142,7 @@ class MLPerfCallback(TrainerCallback):
         Event called at the beginning of a training step. If using gradient accumulation, one training step might take
         several inputs.
         """
+        logger.info(f"cpu memory usage: {get_cpu_memory()}")
         if (
             state.global_step % (state.logging_steps) == 0
             and state.global_step > 0
