@@ -37,7 +37,7 @@ logger = logging.get_logger(__name__)
 
 
 def prepare_model(model, config):
-    if config.tensor_parallelism == 1:
+    if config.tensor_parallelism == 0:
 
         def shard_output(output, mesh):
             real_output = None
