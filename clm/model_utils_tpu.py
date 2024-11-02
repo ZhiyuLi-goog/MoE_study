@@ -37,7 +37,7 @@ logger = logging.get_logger(__name__)
 
 
 def prepare_model(model, config):
-    if config.tensor_parallelism == 0:
+    if config.tensor_parallelism == 1:
 
         def shard_output(output, mesh):
             real_output = None
@@ -220,8 +220,8 @@ def setup_model_optimizer(config):
         for layer in model.model.layers:
             layer.self_attn.rotary_emb._set_buffer(device=xm.xla_device())
     logger.info("model loaded")
-    model = prepare_model(model, config)
-    model = model.to(dtype)
+    # model = prepare_model(model, config)
+    # model = model.to(dtype)
     logger.info("model prepared")
     gc.collect()
     xm.mark_step()
