@@ -66,7 +66,7 @@ def main(config: DictConfig):
         evaluation_strategy="steps",
         save_strategy="no",
         max_steps=config.max_steps,
-        do_eval=False,
+        do_eval=True,
         eval_steps=config.eval_frequency,
         eval_delay=0,
         logging_strategy="no",
