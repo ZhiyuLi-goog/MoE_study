@@ -54,6 +54,8 @@ def main(config: DictConfig):
     set_seed(config.seed)
     logger.info("\n\n************** Experiment configuration ***********")
     logger.info(OmegaConf.to_yaml(config))
+    fsdp_config = OmegaConf.to_container(config.model.fsdp_config)
+    fsdp_config['transformer_layer_cls_to_wrap'] = fsdp_config.pop('fsdp_transformer_layer_cls_to_wrap')
 
     trainer_args = TrainingArguments(
         output_dir=config.run_dir,
@@ -79,7 +81,7 @@ def main(config: DictConfig):
         label_names=["labels"],
         fsdp=True,
         optim='adamw_torch_xla',
-        fsdp_config=OmegaConf.to_container(config.model.fsdp_config),
+        fsdp_config=fsdp_config,
     )
     trainer_args.__post_init__()
     logger.info(f"{trainer_args=}")
