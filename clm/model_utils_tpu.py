@@ -60,8 +60,8 @@ def prepare_model(model, config):
         default_transformer_cls_names_to_wrap = getattr(
             model, "_no_split_modules", None
         )
-        transformer_layer_cls_to_wrap = config.model.fsdp_config.get(
-            "transformer_layer_cls_to_wrap", default_transformer_cls_names_to_wrap
+        fsdp_transformer_layer_cls_to_wrap = config.model.fsdp_config.get(
+            "fsdp_transformer_layer_cls_to_wrap", default_transformer_cls_names_to_wrap
         )
 
         if config.model.fsdp_config["min_num_params"] > 0:
@@ -69,9 +69,9 @@ def prepare_model(model, config):
                 size_based_auto_wrap_policy,
                 min_num_params=config.model.fsdp_config["min_num_params"],
             )
-        elif transformer_layer_cls_to_wrap is not None:
+        elif fsdp_transformer_layer_cls_to_wrap is not None:
             transformer_cls_to_wrap = set()
-            for layer_class in transformer_layer_cls_to_wrap:
+            for layer_class in fsdp_transformer_layer_cls_to_wrap:
                 transformer_cls = get_module_class_from_name(model, layer_class)
                 if transformer_cls is None:
                     raise Exception(
