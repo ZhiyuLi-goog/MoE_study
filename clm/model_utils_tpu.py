@@ -168,7 +168,10 @@ def setup_xla(config):
         jax.config.update("jax_default_matmul_precision", "highest")
 
     num_devices = xr.global_runtime_device_count()
-    mesh_shape = (num_devices // config.tensor_parallelism, config.tensor_parallelism)
+    if config.tensor_parallelism > 1:
+        mesh_shape = (num_devices // config.tensor_parallelism, config.tensor_parallelism)
+    else:
+        mesh_shape = (num_devices, 1)
     device_ids = np.array(range(num_devices))
     mesh = xs.Mesh(device_ids, mesh_shape, axis_names=("fsdp", "tensor"))
     xs.set_global_mesh(mesh)
