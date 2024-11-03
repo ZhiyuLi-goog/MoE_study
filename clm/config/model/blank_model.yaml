@@ -5,8 +5,6 @@ flash_attention: True
 capacity_factor: 0  # dropped implementation with a positive number
 
 fsdp_config: 
-  xla: true
-  xla_fsdp_v2: true
   fsdp_transformer_layer_cls_to_wrap: ["MixtralDecoderLayer"]
   xla_fsdp_grad_ckpt: true
   min_num_params: 0
