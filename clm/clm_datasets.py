@@ -8,8 +8,7 @@ def get_datasets(config):
     # Downloading and loading a dataset from the hub.
     if config.dataset.dataset_name == "c4_mlperf":
         data_files = {
-            # "train": [f"gs://lizhiyu-multipods-eu-west/c4/en_json/3.0.1/c4-train.{i:05d}-of-01024.json" for i in range(768, 1024)],
-            "train": ["gs://lizhiyu-multipods-eu-west/c4/en_val_subset_json/c4-validation_24567exp.json"],
+            "train": [f"gs://lizhiyu-multipods-eu-west/c4/en_json/3.0.1/c4-train.{i:05d}-of-01024.json" for i in range(768, 1024)],
             "validation": ["gs://lizhiyu-multipods-eu-west/c4/en_val_subset_json/c4-validation_24567exp.json"],
         }
         features = Features(
