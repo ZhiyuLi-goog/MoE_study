@@ -57,6 +57,12 @@ def main(config: DictConfig):
     fsdp_config = OmegaConf.to_container(config.model.fsdp_config)
     fsdp_config['transformer_layer_cls_to_wrap'] = fsdp_config.pop('fsdp_transformer_layer_cls_to_wrap')
 
+    if config.eval_frequency == -1:
+        eval_steps = np.ceil(24576 * 2048 / config.max_length / config.global_train_batch_size)
+    else:
+        eval_steps = config.eval_frequency
+    logger.info(f"{eval_steps=}")
+
     trainer_args = TrainingArguments(
         output_dir=config.run_dir,
         do_train=True,
@@ -69,7 +75,7 @@ def main(config: DictConfig):
         save_strategy="no",
         max_steps=config.max_steps,
         do_eval=True,
-        eval_steps=config.eval_frequency,
+        eval_steps=eval_steps,
         eval_delay=0,
         logging_strategy="no",
         logging_steps=config.report_metrics_freq,
@@ -82,6 +88,9 @@ def main(config: DictConfig):
         fsdp=True,
         optim='adamw_torch_xla',
         fsdp_config=fsdp_config,
+        learning_rate=config.lr,
+        warmup_ratio=0.05,
+        lr_scheduler_type="cosine",
     )
     trainer_args.__post_init__()
     logger.info(f"{trainer_args=}")

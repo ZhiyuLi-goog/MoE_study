@@ -46,7 +46,7 @@ do_first_eval: false
 run_dir: ${path_join:${output_dir},${exp_name}}
 
 # the learning rate
-lr: 5e-7
+lr: 2e-5
 
 # number of steps to accumulate over for each batch
 #   (e.g. if batch_size=4 and gradient_accumulation_steps=2, then we will
@@ -63,7 +63,7 @@ n_eval_examples: null
 optimizer: ADAMW_TORCH_XLA
 
 # evaluate and save model every eval_every steps
-eval_frequency: 3
+eval_frequency: -1
 
 # path to load checkpoint
 checkpoint_manager_path: null
