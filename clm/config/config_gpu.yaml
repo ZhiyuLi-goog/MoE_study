@@ -1,0 +1,35 @@
+model:
+  name_or_path: mistralai/Mixtral-8x7B-v0.1
+  max_sequence_length: 32786
+
+trainer:
+  max_token_steps: 1.0e9
+
+  nodes: 1
+  global_batch_size: 8
+  local_batch_size: 1
+
+  tensor_parallel_size: 1
+  pipeline_parallel_size: 1
+  context_parallel_size: 1
+  sequence_parallel: True
+  
+optimizer:
+  lr: 1e-5
+
+dataset:
+  dataset_name: "c4_mlperf"
+  streaming: False
+  num_proc: 1
+  load_from_cache_file: True
+
+seed: 0
+run_dir: "/results"
+per_device_train_batch_size: ${trainer.local_batch_size}
+per_device_eval_batch_size: ${trainer.local_batch_size}
+gradient_accumulation_steps: 1
+max_grad_norm: 0.0
+max_steps: 10
+eval_frequency: 3
+report_metrics_freq: 3
+cache_local_dir: null

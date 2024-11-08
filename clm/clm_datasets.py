@@ -1,21 +1,30 @@
-from datasets import load_dataset, Features, Value
-from transformers.testing_utils import CaptureLogger
-import transformers
 from itertools import chain
+
+import pytorch_lightning as pl
+import transformers
+from datasets import Features, Value, load_dataset
+from torch.utils.data import DataLoader
+from transformers.testing_utils import CaptureLogger
 
 
 def get_datasets(config):
     # Downloading and loading a dataset from the hub.
     if config.dataset.dataset_name == "c4_mlperf":
         data_files = {
-            "train": [f"hf://datasets/allenai/c4/en/c4-train.{i:05d}-of-01024.json.gz" for i in range(768, 1024)],
-            "validation": [f"hf://datasets/allenai/c4/en/c4-validation.{i:05d}-of-00008.json.gz" for i in range(1)],  # TODO change
+            "train": [
+                f"hf://datasets/allenai/c4/en/c4-train.{i:05d}-of-01024.json.gz"
+                for i in range(768, 1024)
+            ],
+            "validation": [
+                f"hf://datasets/allenai/c4/en/c4-validation.{i:05d}-of-00008.json.gz"
+                for i in range(1)
+            ],  # TODO change
         }
         features = Features(
             {
-                'text': Value(dtype='string', id=None),
-                'timestamp': Value(dtype='string', id=None),
-                'url': Value(dtype='string', id=None),
+                "text": Value(dtype="string", id=None),
+                "timestamp": Value(dtype="string", id=None),
+                "url": Value(dtype="string", id=None),
             }
         )
         raw_datasets = load_dataset(
@@ -41,7 +50,9 @@ def process_datasets(raw_datasets, tokenizer, config):
     text_column_name = "text" if "text" in column_names else column_names[0]
 
     # since this will be pickled to avoid _LazyModule error in Hasher force logger loading before tokenize_function
-    tok_logger = transformers.utils.logging.get_logger("transformers.tokenization_utils_base")
+    tok_logger = transformers.utils.logging.get_logger(
+        "transformers.tokenization_utils_base"
+    )
 
     def tokenize_function(examples):
         with CaptureLogger(tok_logger) as cl:
@@ -53,7 +64,7 @@ def process_datasets(raw_datasets, tokenizer, config):
                 " before being passed to the model."
             )
         return output
-    
+
     if not config.dataset.streaming:
         tokenized_datasets = raw_datasets.map(
             tokenize_function,
@@ -69,8 +80,9 @@ def process_datasets(raw_datasets, tokenizer, config):
             batched=True,
             remove_columns=column_names,
         )
-    
+
     block_size = config.max_length
+
     # Main data processing function that will concatenate all texts from our dataset and generate chunks of block_size.
     def group_texts(examples):
         # Concatenate all texts.
@@ -100,10 +112,20 @@ def process_datasets(raw_datasets, tokenizer, config):
             group_texts,
             batched=True,
         )
-    
+
     return lm_datasets
-    
-        
 
 
+class DatasetModule(pl.LightningDataModule):
+    def __init__(self, train_dataset, eval_dataset):
+        self.train_dataset = train_dataset
+        self.eval_dataset = eval_dataset
 
+    def train_dataloader(self):
+        return DataLoader(self.train_dataset, batch_size=1)
+
+    def val_dataloader(self):
+        return DataLoader(self.eval_dataset, batch_size=1)
+
+    def test_dataloader(self):
+        return DataLoader(self.eval_dataset, batch_size=1)

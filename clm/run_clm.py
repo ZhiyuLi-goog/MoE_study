@@ -1,30 +1,33 @@
-import torch
 import os
-import hydra
-from omegaconf import OmegaConf, DictConfig, open_dict
-from transformers import AutoTokenizer, TrainingArguments, default_data_collator
-
-import numpy as np
-
 from pdb import set_trace
 
-from transformers import set_seed
+import hydra
+import numpy as np
+import torch
+from omegaconf import DictConfig, OmegaConf, open_dict
+from transformers import (
+    AutoTokenizer,
+    TrainingArguments,
+    default_data_collator,
+    set_seed,
+)
+
+from clm_datasets import get_datasets, process_datasets
 from file_utils import get_file
 from mlperf_logging_utils import ClmLogger, MLPerfCallback
 
-from clm_datasets import get_datasets, process_datasets
 USE_CUDA = torch.cuda.is_available()  # os.environ.get('USE_CUDA', False)
 
 if not USE_CUDA:
+    from accelerate import Accelerator
     from transformers import Trainer, logging
 
     from model_utils_tpu import (
-        setup_xla,
-        setup_model_optimizer,
-        get_global_batch_size,
         Tracker,
+        get_global_batch_size,
+        setup_model_optimizer,
+        setup_xla,
     )
-    from accelerate import Accelerator
 
     OmegaConf.register_new_resolver(
         "get_global_batch_size",
@@ -34,50 +37,34 @@ if not USE_CUDA:
         "path_join", lambda output_dir, exp_name: os.path.join(output_dir, exp_name)
     )
 
-    logger = logging.get_logger(__name__)
 else:
+    import logging
+
     import torch.multiprocessing as mp
-    from nemo.core.config import hydra_runner
-    from nemo_aligner.utils.train_script_utils import (
-        CustomLoggerWrapper,
-        add_custom_checkpoint_callback,
-        init_using_ptl,
-        extract_optimizer_scheduler_from_ptl_model
-    )
-    from model_utils_gpu import (
-        setup_distributed,
-        setup_model_optimizer,
-        Tracker,
-    )
-    from input_pipeline_gpu import (
-        get_input_pipeline,
-    )
+    from nemo.collections import llm
+
+    from model_utils_gpu import Tracker, setup_distributed, setup_model_and_trainer
     from trainer_utils_gpu import Trainer
-    from nemo_aligner.utils.distributed import Timer
 
     OmegaConf.register_new_resolver("multiply", lambda x, y: x * y, replace=True)
     OmegaConf.register_new_resolver("int_div", lambda x, y: x // y, replace=True)
+    OmegaConf.register_new_resolver(
+        "path_join", lambda output_dir, exp_name: os.path.join(output_dir, exp_name)
+    )
+    OmegaConf.register_new_resolver(
+        "get_global_batch_size",
+        lambda per_device_batch_size: per_device_batch_size,
+    )
 
     mp.set_start_method("spawn", force=True)
 
 
-def hydra_decorator(config_path, config_name):
-    def decorator(func):
-        if not USE_CUDA:
-            return hydra.main(
-                version_base=None, config_path=config_path, config_name=config_name
-            )(func)
-        else:
-            return hydra_runner(config_path=config_path, config_name=config_name)(func)
-
-    return decorator
-
-
-@hydra_decorator(config_path="config", config_name="config")
+@hydra.main(version_base=None, config_path="config", config_name="config")
 def main(config: DictConfig):
     if USE_CUDA:
-        from nemo.utils import logging as logger
-
+        logger = logging.getLogger(__name__)
+    else:
+        logger = logging.get_logger(__name__)
     OmegaConf.resolve(config)
     set_seed(config.seed)
     logger.info("\n\n************** Experiment configuration ***********")
@@ -107,6 +94,7 @@ def main(config: DictConfig):
         label_names=["labels"],
     )
 
+    clmlogger = ClmLogger(target_eval_loss=0)
     if not USE_CUDA:
         config_path = os.path.join(config.run_dir, "config.yaml")
         with get_file(config_path, "w") as f:
@@ -125,88 +113,65 @@ def main(config: DictConfig):
                 f"Found mismatch between {tokenizer.vocab_size=} and {model.config.vocab_size}"
             )
     else:
-        from nemo.utils.exp_manager import exp_manager
-        from nemo_aligner.utils.train_script_utils import resolve_and_create_trainer
-
-        megatron_trainer = resolve_and_create_trainer(config, "sft")
-        exp_manager(megatron_trainer, config.exp_manager)
-
-        with open_dict(config):
-            config.model.precision = config.trainer.precision
-
-        model, _, _ = setup_model_optimizer(config, megatron_trainer)
-        tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
-
-        with open_dict(config):
-            # overwrite the model config with the config from the checkpoint
-            config.model.encoder_seq_length = model.cfg.encoder_seq_length
-   
+        model, trainer, optimizer = setup_model_and_trainer(
+            input_sequence_length=config.model.max_sequence_length,
+            global_batch_size=config.trainer.global_batch_size,
+            max_training_tokens=config.trainer.max_token_steps,
+            nodes=config.trainer.nodes,
+            tp_size=config.trainer.tensor_parallel_size,
+            pp_size=config.trainer.pipeline_parallel_size,
+            cp_size=config.trainer.context_parallel_size,
+            learning_rate=config.optimizer.lr,
+            tokenizer_name_or_path=config.model.name_or_path,
+            # callbacks=[MLPerfCallback(clmlogger, 100, 10)],
+            callbacks=[],
+        )
     raw_datasets = get_datasets(config)
     datasets = process_datasets(raw_datasets, tokenizer, config)
     logger.info(f"{datasets=}")
-    train_dataset, eval_dataset = datasets['train'], datasets['validation']
+    train_dataset, eval_dataset = datasets["train"], datasets["validation"]
+
     if USE_CUDA:
-        train_dataset, eval_dataset, train_ds, _ = get_input_pipeline(config, train_dataset, eval_dataset, tokenizer, model.tokenizer)
-        tokenizer = model.tokenizer
-        # initialize optimizer states
-        init_using_ptl(megatron_trainer, model, train_dataset, train_ds)
-        optimizer, scheduler = extract_optimizer_scheduler_from_ptl_model(model)
+        from clm_datasets import DatasetModule
 
-    clmlogger = ClmLogger(target_eval_loss=0)
-
-    def preprocess_logits_for_metrics(logits, labels):
-        if isinstance(logits, tuple):
-            # Depending on the model and config, logits may contain extra tensors,
-            # like past_key_values, but logits always come first
-            logits = logits[0]
-        return logits
-
-
-    def compute_metrics(eval_preds):
-        logits, labels = eval_preds
-        # Flatten the tokens
-        logits = logits[..., :-1, :].contiguous()
-        labels = labels[..., 1:].contiguous()
-        loss_fct = nn.CrossEntropyLoss()
-        logits = logits.view(-1, logits.shape[-1])
-        labels = labels.view(-1)
-        # Enable model parallelism
-        labels = labels.to(logits.device)
-        loss = loss_fct(logits, labels)
-        return {
-            'eval_loss': loss,
-        }
-
-    # Initialize our Trainer
-    trainer = Trainer(
-        model=model,
-        args=trainer_args,
-        tokenizer=tokenizer,
-        train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
-        optimizers=[optimizer, scheduler],
-        # Data collator will default to DataCollatorWithPadding, so we change it.
-        compute_metrics=None,
-        data_collator=default_data_collator,
-        # callbacks=[MLPerfCallback(clmlogger, len(train_dataset), len(eval_dataset))],
-        callbacks=[MLPerfCallback(clmlogger, 100, 10)],
-    )
-    if USE_CUDA:
-        ckpt_callback = add_custom_checkpoint_callback(megatron_trainer, model)
-        timer = Timer(config.exp_manager.get("max_time_per_run"))
-
-        trainer.setup(
-            cfg=config.trainer.sft,
-            logger=CustomLoggerWrapper(megatron_trainer.loggers),
-            ckpt_callback=ckpt_callback,
-            run_timer=timer,
+        dataset = DatasetModule(train_dataset, eval_dataset)
+        llm.train(
+            model=model,
+            data=dataset,
+            trainer=trainer,
+            tokenizer="data",
+            optim=optimizer,
         )
+    else:
 
-    trainer.train()
+        def preprocess_logits_for_metrics(logits, labels):
+            if isinstance(logits, tuple):
+                # Depending on the model and config, logits may contain extra tensors,
+                # like past_key_values, but logits always come first
+                logits = logits[0]
+            return logits
+
+        # Initialize our Trainer
+        trainer = Trainer(
+            model=model,
+            args=trainer_args,
+            tokenizer=tokenizer,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            optimizers=[optimizer, scheduler],
+            # Data collator will default to DataCollatorWithPadding, so we change it.
+            compute_metrics=None,
+            data_collator=default_data_collator,
+            # callbacks=[MLPerfCallback(clmlogger, len(train_dataset), len(eval_dataset))],
+            callbacks=[MLPerfCallback(clmlogger, 100, 10)],
+        )
+        trainer.train()
+
 
 def _mp_fn(index):
     # For xla_spawn (TPUs)
     main()
+
 
 if __name__ == "__main__":
     main()
