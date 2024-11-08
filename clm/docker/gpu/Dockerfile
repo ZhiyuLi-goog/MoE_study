@@ -12,41 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM nvcr.io/nvidia/nemo:24.07
+FROM nvcr.io/nvidia/nemo:dev
 WORKDIR /app
 
-# GCSfuse components (used to provide shared storage, not intended for high performance)
-RUN apt-get update && apt-get install --yes --no-install-recommends \
-    ca-certificates \
-    curl \
-    gnupg \
-  && echo "deb https://packages.cloud.google.com/apt gcsfuse-buster main" \
-    | tee /etc/apt/sources.list.d/gcsfuse.list \
-  && echo "deb https://packages.cloud.google.com/apt cloud-sdk main" \
-    | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list \
-  && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add - \
-  && apt-get update \
-  && apt-get install --yes gcsfuse \
-  && apt-get install --yes google-cloud-cli \
-  && apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
-  && mkdir /gcs
-
 RUN pip install git+https://github.com/NVIDIA/dllogger#egg=dllogger
-RUN pip install datasets==2.20.0
-
-# Install the Google Cloud SDK
-RUN apt-get update && apt-get install -y google-cloud-sdk vim
-
-RUN pip install hydra-core
-RUN pip install sentencepiece
+RUN pip install datasets==2.20.0 hydra-core sentencepiece
 RUN pip install "git+https://github.com/mlperf/logging.git"
 
-# checkpoint loading in gcs
-RUN pip install gcsfs
-
-# clone current repo
-ARG GIT_REF=main
-RUN git clone https://github.com/ZhiyuLi-goog/MoE_study.git && \
-    cd MoE_study && \
-    echo GIT_REF=${GIT_REF} && \
-    git checkout ${GIT_REF}
+ADD . /app

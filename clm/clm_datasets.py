@@ -1,11 +1,15 @@
 import os
-from datasets import load_dataset, Features, Value, concatenate_datasets
-from transformers.testing_utils import CaptureLogger
-import transformers
 from itertools import chain
+
+import transformers
+from datasets import Features, Value, concatenate_datasets, load_dataset
 from transformers import logging
+from transformers.testing_utils import CaptureLogger
 
 logger = logging.get_logger(__name__)
+
+import pytorch_lightning as pl
+from torch.utils.data import DataLoader
 
 
 def get_datasets(config):
@@ -111,7 +115,6 @@ def process_datasets(raw_datasets, tokenizer, config):
         key: dataset.remove_columns(column_names)
         for key, dataset in tokenized_datasets.items()
     }
-
     block_size = config.max_length
 
     # Main data processing function that will concatenate all texts from our dataset and generate chunks of block_size.
@@ -170,3 +173,18 @@ def process_datasets(raw_datasets, tokenizer, config):
         )
 
     return lm_datasets
+
+
+class DatasetModule(pl.LightningDataModule):
+    def __init__(self, train_dataset, eval_dataset):
+        self.train_dataset = train_dataset
+        self.eval_dataset = eval_dataset
+
+    def train_dataloader(self):
+        return DataLoader(self.train_dataset, batch_size=1)
+
+    def val_dataloader(self):
+        return DataLoader(self.eval_dataset, batch_size=1)
+
+    def test_dataloader(self):
+        return DataLoader(self.eval_dataset, batch_size=1)

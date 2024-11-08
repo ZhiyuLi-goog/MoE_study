@@ -1,18 +1,15 @@
 import os
-from omegaconf.omegaconf import OmegaConf, open_dict
-import torch
 
-from nemo.utils import logging
+import torch
+from megatron.core.optimizer import OptimizerConfig
+from nemo import lightning as nl
+from nemo.collections import llm
 from nemo.collections.nlp.data.language_modeling.megatron.gpt_sft_chat_dataset import (
     get_prompt_template_example,
 )
-
-from nemo_aligner.utils.train_script_utils import (
-    init_distributed,
-    init_peft,
-)
-from nemo_aligner.utils.utils import load_from_nemo
-from nemo_aligner.models.nlp.gpt.gpt_sft_model import GPTSFTModel
+from nemo.utils import logging
+from omegaconf.omegaconf import OmegaConf, open_dict
+from transformers import AutoTokenizer
 
 
 def setup_distributed(config):
@@ -50,21 +47,82 @@ def setup_distributed(config):
     return local_rank, rank, world_size
 
 
-def setup_model_optimizer(config, trainer):
+def setup_model_and_trainer(
+    input_sequence_length: int,
+    global_batch_size: int,
+    max_training_tokens: int,
+    nodes: int,
+    tp_size: int,
+    pp_size: int,
+    cp_size: int,
+    learning_rate: float,
+    tokenizer_name_or_path: str,
+    *,
+    callbacks: list,
+):
     logging.info("loading model")
-    model, updated_cfg = load_from_nemo(
-        GPTSFTModel,
-        config,
-        trainer,
-        strict=True,
-        modify_config_fn=_modify_config,
-        restore_path=config.model.restore_from_path,
-        return_updated_cfg=True,
+    mixtral_config = llm.MixtralConfig8x7B(
+        max_position_embeddings=input_sequence_length,
+        seq_length=input_sequence_length,
     )
-    init_peft(model, updated_cfg)
 
-    init_distributed(trainer, model, config.model.get("transformer_engine", False))
-    return model, None, None
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path)
+    model = llm.MixtralModel(mixtral_config, tokenizer=tokenizer)
+
+    ## initialize the strategy
+    strategy = nl.MegatronStrategy(
+        tensor_model_parallel_size=tp_size,
+        pipeline_model_parallel_size=pp_size,
+        sequence_parallel=True,
+        context_parallel_size=cp_size,
+        pipeline_dtype=torch.bfloat16,
+    )
+
+    precision = nl.MegatronMixedPrecision(
+        precision="bf16-mixed",
+        params_dtype=torch.bfloat16,
+        pipeline_dtype=torch.bfloat16,
+        autocast_enabled=False,
+        grad_reduce_in_fp32=True,
+    )
+
+    tokens_per_batch = global_batch_size * input_sequence_length
+    training_steps = (max_training_tokens + tokens_per_batch - 1) // tokens_per_batch
+
+    ## setup the optimizer
+    opt_config = OptimizerConfig(
+        optimizer="adam",
+        lr=learning_rate,
+        bf16=True,
+        params_dtype=torch.bfloat16,
+    )
+
+    opt_sched = nl.lr_scheduler.CosineAnnealingScheduler(
+        max_steps=training_steps,
+        warmup_steps=0,
+        min_lr=learning_rate * 0.01,
+    )
+
+    opt = nl.MegatronOptimizerModule(config=opt_config, lr_scheduler=opt_sched)
+
+    trainer = nl.Trainer(
+        devices=8,
+        num_nodes=nodes,
+        max_steps=training_steps,
+        accelerator="gpu",
+        strategy=strategy,
+        plugins=precision,
+        callbacks=callbacks,
+        logger=None,
+        enable_progress_bar=False,
+        val_check_interval=100,
+    )
+
+    return (
+        model,
+        trainer,
+        opt,
+    )
 
 
 def flatten(dictionary, parent_key="", separator="_"):
