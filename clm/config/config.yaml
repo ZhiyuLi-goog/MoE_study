@@ -78,7 +78,7 @@ shuffle: True
 full_precision: False
 
 # path to save compile cache for torch xla
-local_compile_cache_dir: null
+local_compile_cache_dir: ${run_dir}
 
 # tensor_parallelism and fsdp parallelism would be num_devices / tensor_parallelism
 tensor_parallelism: 1
