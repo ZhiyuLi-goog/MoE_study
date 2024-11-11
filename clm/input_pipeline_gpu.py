@@ -12,6 +12,7 @@ from nemo.collections.nlp.data.language_modeling.megatron.data_samplers import (
     MegatronPretrainingSampler,
 )
 
+
 def build_dataloader(
     cfg,
     dataset,
@@ -40,10 +41,16 @@ def build_dataloader(
     }
 
     if use_random_sampler:
-        cls = MegatronPretrainingRandomBatchSampler if load_gbs else MegatronPretrainingRandomSampler
+        cls = (
+            MegatronPretrainingRandomBatchSampler
+            if load_gbs
+            else MegatronPretrainingRandomSampler
+        )
         common_params["seed"] = cfg.model.seed
     else:
-        cls = MegatronPretrainingBatchSampler if load_gbs else MegatronPretrainingSampler
+        cls = (
+            MegatronPretrainingBatchSampler if load_gbs else MegatronPretrainingSampler
+        )
     batch_sampler = cls(**common_params)
 
     return torch.utils.data.DataLoader(
@@ -54,7 +61,16 @@ def build_dataloader(
         collate_fn=collate_fn,
     )
 
-def build_sft_dataset(data_cfg, indexed_dataset, tokenizer, num_samples, answer_only_loss=True, is_chat=True, special_tokens=None):
+
+def build_sft_dataset(
+    data_cfg,
+    indexed_dataset,
+    tokenizer,
+    num_samples,
+    answer_only_loss=True,
+    is_chat=True,
+    special_tokens=None,
+):
     packed_sequence = data_cfg.get("packed_sequence", False)
     dataset_kwargs = {}
 
@@ -95,20 +111,20 @@ def build_sft_dataset(data_cfg, indexed_dataset, tokenizer, num_samples, answer_
     )
     return dataset
 
+
 def get_input_pipeline(config, train_dataset, test_dataset, tokenizer, model_tokenizer):
     """get input_pipeline."""
     if config.model.data.data_impl == "mock":
-        raise ValueError(
-            "Not supported: synthetic data"
-        )
+        raise ValueError("Not supported: synthetic data")
     else:
+
         def decode_ids(examples):
             result = {
                 "input": tokenizer.batch_decode(examples["input_ids"]),
                 "output": tokenizer.batch_decode(examples["labels"]),
             }
             return result
-    
+
         train_dataset = train_dataset.map(
             decode_ids,
             batched=True,
@@ -122,7 +138,9 @@ def get_input_pipeline(config, train_dataset, test_dataset, tokenizer, model_tok
             if config.trainer.sft.max_steps < 0:
                 num_samples = None
             else:
-                num_samples = config.trainer.sft.max_steps * train_data_cfg.global_batch_size
+                num_samples = (
+                    config.trainer.sft.max_steps * train_data_cfg.global_batch_size
+                )
         else:
             num_samples = None
 
@@ -140,7 +158,9 @@ def get_input_pipeline(config, train_dataset, test_dataset, tokenizer, model_tok
             special_tokens=config.model.data.chat_prompt_tokens,
         )
         if config.model.data.get("sample", False):
-            num_samples = config.trainer.sft.limit_val_batches * val_data_cfg.global_batch_size
+            num_samples = (
+                config.trainer.sft.limit_val_batches * val_data_cfg.global_batch_size
+            )
         else:
             num_samples = None
         validation_ds = build_sft_dataset(

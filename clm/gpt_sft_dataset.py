@@ -1,6 +1,9 @@
 from typing import Mapping, Optional
-from nemo.collections.nlp.data.language_modeling.megatron.gpt_sft_dataset import GPTSFTDataset
+from nemo.collections.nlp.data.language_modeling.megatron.gpt_sft_dataset import (
+    GPTSFTDataset,
+)
 from nemo.collections.common.tokenizers.tokenizer_spec import TokenizerSpec
+
 
 class GPTSFTDatasetHF(GPTSFTDataset):
     def __init__(
@@ -28,8 +31,10 @@ class GPTSFTDatasetHF(GPTSFTDataset):
         memmap_workers: Optional[int] = None,
         hf_dataset: bool = False,
         global_sample_mapping: bool = False,
-        truncation_method: str = 'right',
-        special_tokens: Optional[Mapping[str, str]] = None,  # special tokens, a dictory of {token_type: token}
+        truncation_method: str = "right",
+        special_tokens: Optional[
+            Mapping[str, str]
+        ] = None,  # special tokens, a dictory of {token_type: token}
         is_test: bool = False,
         output_original_text: bool = False,
         ceil_to_power_2: bool = False,
@@ -73,7 +78,9 @@ class GPTSFTDatasetHF(GPTSFTDataset):
         self.seed = seed
         self.label_key = label_key
         self.answer_only_loss = answer_only_loss
-        self.truncation_fields = truncation_field.split(',') if truncation_field is not None else []
+        self.truncation_fields = (
+            truncation_field.split(",") if truncation_field is not None else []
+        )
         self.pad_to_max_length = pad_to_max_length
         self.index_mapping_dir = index_mapping_dir
         self.prompt_template = prompt_template

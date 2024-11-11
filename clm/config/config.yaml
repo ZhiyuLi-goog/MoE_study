@@ -2,11 +2,10 @@ defaults:
 - _self_
 - model: blank_model
 - sched: WarmupHoldPolicy
+- dataset: c4_mlperf
 
 # name for this experiment in the local run directory
 exp_name: moe_trial
-
-config_path: null
 
 # random seed for batch sampling
 seed: 0
@@ -19,25 +18,16 @@ global_train_batch_size: ${get_global_batch_size:${per_device_train_batch_size}}
 per_device_eval_batch_size: ${per_device_train_batch_size}
 global_eval_batch_size: ${get_global_batch_size:${per_device_eval_batch_size}}
 
-max_grad_norm: 0.
+max_grad_norm: 1.
 
 max_steps: 10
-use_synthetic_data: true
 
 pad_token_id: -100
 
-dataset:
-  dataset_name: wikitext
-  dataset_config_name: wikitext-2-raw-v1
-  streaming: False
-
-  # num of process in data processing
-  num_proc: 1
-
-  # whether to load dataset from cache
-  load_from_cache_file: True
-
 output_dir: /tmp
+
+# early stop once reaching target eval_loss
+target_eval_loss: 0
 
 # whether to eval at the very beginning of training
 do_first_eval: false
@@ -46,30 +36,28 @@ do_first_eval: false
 run_dir: ${path_join:${output_dir},${exp_name}}
 
 # the learning rate
-lr: 5e-7
+lr: 2e-5
 
 # number of steps to accumulate over for each batch
-#   (e.g. if batch_size=4 and gradient_accumulation_steps=2, then we will
-#   accumulate gradients over 2 microbatches of size 2)
-# gradient_accumulation_steps: 1
+#   (e.g. if global_train_batch_size=4 and gradient_accumulation_steps=2, then we will
+#   accumulate gradients over equivalent batch size of 8 i.e. 2 microbatches of size 4)
+gradient_accumulation_steps: 1
 
 # the maximum allowed length for an input
 max_length: 512
 
-# the number of examples to evaluate on (and sample from, if sample_during_eval is true)
+# the max number of examples to evaluate on
 n_eval_examples: null
 
 # The optimizer to use; we use RMSprop because it works about as well as Adam and is more memory-efficient
 optimizer: ADAMW_TORCH_XLA
+weight_decay: 0.1
 
 # evaluate and save model every eval_every steps
-eval_frequency: 3
+eval_frequency: -1
 
 # path to load checkpoint
 checkpoint_manager_path: null
-
-# dry run experiment with a subset of dataset
-dry_run: False
 
 # shuffle train data set
 shuffle: True
@@ -78,18 +66,13 @@ shuffle: True
 full_precision: False
 
 # path to save compile cache for torch xla
-local_compile_cache_dir: null
+local_compile_cache_dir: ${run_dir}
 
 # tensor_parallelism and fsdp parallelism would be num_devices / tensor_parallelism
 tensor_parallelism: 1
 
-# report frequency of train step
-report_metrics_freq: 1
-
 # cache of models
 cache_local_dir: null
-
-gradient_accumulation_steps: 1
 
 
 hydra:

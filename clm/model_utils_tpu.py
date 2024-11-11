@@ -1,5 +1,6 @@
 import functools
 import gc
+import os
 from omegaconf import OmegaConf
 import torch
 import torch_xla
@@ -27,8 +28,10 @@ from transformers.trainer_pt_utils import (
     get_module_class_from_name,
 )
 from psutil import Process
-from transformers import AutoModelForCausalLM, AutoConfig
+from transformers import AutoModelForCausalLM, AutoConfig, TrainerCallback
 from nemo.core.optim.lr_scheduler import CosineAnnealing, WarmupHoldPolicy
+from torch.utils.tensorboard import SummaryWriter
+import json
 
 
 logger = logging.get_logger(__name__)
@@ -156,9 +159,7 @@ def setup_xla(config):
     if config.full_precision:
         import jax
 
-        assert (
-            config.model.dtype == "float32"
-        ), "model dtype need to be float32"
+        assert config.model.dtype == "float32", "model dtype need to be float32"
         torch_xla._XLAC._xla_set_use_full_mat_mul_precision(
             use_full_mat_mul_precision=True
         )
@@ -247,16 +248,13 @@ def setup_model_optimizer(config):
     else:
         if config.model.config_path:
             model.apply(model._init_weights)
-    
-    n_params = sum({p.data_ptr(): p.numel() for p in model.parameters()}.values())
-    logger.info(f"Total size={n_params/1e9:.3f}B params")
-    n_active_params = sum({p.data_ptr(): p.numel() for p in model.parameters() if p.requires_grad}.values())
-    logger.info(f"Active size={n_active_params/1e9:.3f}B params")
 
     if config.optimizer == "ADAMW_TORCH_XLA":
         from torch_xla.amp.syncfree import AdamW
 
-        optimizer = AdamW(model.parameters(), lr=config.lr)
+        optimizer = AdamW(
+            model.parameters(), lr=config.lr, weight_decay=config.weight_decay
+        )
     else:
         optimizer = getattr(torch.optim, config.optimizer)(
             model.parameters(), lr=config.lr
@@ -270,7 +268,7 @@ def setup_model_optimizer(config):
         scheduler = WarmupHoldPolicy(optimizer=optimizer, **sched_config)
     elif scheduler_name == "CosineAnnealing":
         assert (
-            config.lr >= sched_config.min_lr
+            config.lr >= sched_config["min_lr"]
         ), f"{config.lr=} should be larger than {config.sched.min_lr=}"
         scheduler = CosineAnnealing(optimizer=optimizer, **sched_config)
     else:
@@ -298,45 +296,41 @@ def flatten(dictionary, parent_key="", separator="_"):
     return dict(items)
 
 
-class Tracker:
-    def __init__(self, config, accelerator, logger):
+class TensorBoardCallback(TrainerCallback):
+    """
+    A [`TrainerCallback`] that sends the logs to [TensorBoard](https://www.tensorflow.org/tensorboard).
+
+    Args:
+        tb_writer (`SummaryWriter`, *optional*):
+            The writer to use. Will instantiate one if not set.
+    """
+
+    def __init__(self, config):
         exp_config = {}
         for k, v in flatten(OmegaConf.to_container(config)).items():
             if isinstance(v, (str, int, float, str, bool, torch.Tensor)):
                 exp_config[k] = v
             else:
                 exp_config[k] = str(v)
-
-        if xr.process_index() == 0:
-            accelerator.init_trackers("tensorboard", config=exp_config)
-        self.accelerator = accelerator
-        self.logger = logger
-        self.tracker = xm.RateTracker()
-        self.config = config
-
-    def convert_metrics(self, metrics):
-        return {
-            k: v.cpu().item() if isinstance(v, torch.Tensor) else v
-            for k, v in metrics.items()
-        }
-
-    def report_train_metrics(self, num_examples, metrics, tracker):
-        metrics = self.convert_metrics(metrics)
-        if xr.process_index() == 0:
-            self.accelerator.log(metrics, step=num_examples)
-        logger.info(f"{metrics=}, {num_examples=}, {tracker.rate()=}")
-
-    def report_eval_metrics(self, num_examples, metrics):
-        metrics = self.convert_metrics(metrics)
-        if xr.process_index() == 0:
-            self.accelerator.log(metrics, step=num_examples)
-        logger.info(f"{metrics=}, {num_examples=}")
-
-    def record_train_step(self, metrics, num_examples):
-        self.tracker.add(self.config.global_train_batch_size)
-        xm.add_step_closure(
-            self.report_train_metrics, args=(num_examples, metrics, self.tracker)
+        self.tb_writer = SummaryWriter(
+            log_dir=os.path.join(config.run_dir, "tensorboard")
         )
+        self.tb_writer.add_text("model_config", json.dumps(exp_config, indent=2))
 
-    def record_eval_step(self, metrics, num_examples):
-        xm.add_step_closure(self.report_eval_metrics, args=(num_examples, metrics))
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        for k, v in logs.items():
+            if isinstance(v, (int, float)):
+                self.tb_writer.add_scalar(k, v, state.global_step)
+            else:
+                logger.warning(
+                    "Trainer is attempting to log a value of "
+                    f'"{v}" of type {type(v)} for key "{k}" as a scalar. '
+                    "This invocation of Tensorboard's writer.add_scalar() "
+                    "is incorrect so we dropped this attribute."
+                )
+        self.tb_writer.flush()
+
+    def on_train_end(self, args, state, control, **kwargs):
+        if self.tb_writer:
+            self.tb_writer.close()
+            self.tb_writer = None

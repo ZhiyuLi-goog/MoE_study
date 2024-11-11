@@ -26,7 +26,11 @@ from nemo.utils import logging
 from nemo_aligner.metrics import InferenceMetricsHandler
 from nemo_aligner.utils.distributed import SyncTimer
 from nemo_aligner.utils.train_utils import clip_gradients
-from nemo_aligner.utils.trainer_utils import check_progress, compute_limit_batches, compute_num_steps_per_epoch
+from nemo_aligner.utils.trainer_utils import (
+    check_progress,
+    compute_limit_batches,
+    compute_num_steps_per_epoch,
+)
 
 from transformers import TrainingArguments
 
@@ -35,7 +39,7 @@ IMAGE_CAPTION_KEY = "images_and_captions"
 
 class Trainer:
     """trainer that implements the supervised training loop
-        this is useful for things like SFT and reward model training
+    this is useful for things like SFT and reward model training
     """
 
     def __init__(
@@ -53,7 +57,7 @@ class Trainer:
         self.model = model
         self.test_dataloader = None
         self.train_dataloader, self.val_dataloader = train_dataset, eval_dataset
-        
+
         self.args = args
         self.tokenizer = tokenizer
         self.optimizer = optimizers[0]
@@ -63,17 +67,23 @@ class Trainer:
         self.consumed_samples = 0
 
         self.timer = SyncTimer(
-            reduction="mean", sync_cuda=True, buffer_size=1, reduce_op=torch.distributed.ReduceOp.MAX
+            reduction="mean",
+            sync_cuda=True,
+            buffer_size=1,
+            reduce_op=torch.distributed.ReduceOp.MAX,
         )
 
     def setup(self, cfg, logger, ckpt_callback, run_timer, run_init_validation=False):
         self.cfg = cfg
         # compute `max_steps`
         self.num_steps_per_epoch = compute_num_steps_per_epoch(
-            self.train_dataloader.batch_sampler, self.cfg.get("limit_train_batches", 1.0)
+            self.train_dataloader.batch_sampler,
+            self.cfg.get("limit_train_batches", 1.0),
         )
 
-        self.limit_val_batches = compute_limit_batches(len(self.val_dataloader), self.cfg.limit_val_batches)
+        self.limit_val_batches = compute_limit_batches(
+            len(self.val_dataloader), self.cfg.limit_val_batches
+        )
         self.val_check_interval = (
             int(self.cfg.val_check_interval * self.num_steps_per_epoch)
             if isinstance(self.cfg.val_check_interval, float)
@@ -86,14 +96,18 @@ class Trainer:
         self.ckpt_callback = ckpt_callback
         # this timer checks if we should stop training
         self.run_timer = run_timer
-        
+
         # any metrics that require running full token-by-token inference during validation
-        self.inference_metrics_handler = InferenceMetricsHandler(cfg.get("inference_metrics"))
+        self.inference_metrics_handler = InferenceMetricsHandler(
+            cfg.get("inference_metrics")
+        )
 
     def validation_step(self, batch):
         self.model.prepare_for_validation_step()
 
-        loss_mean, metrics = self.model.get_loss_and_metrics(batch=batch, forward_only=True)
+        loss_mean, metrics = self.model.get_loss_and_metrics(
+            batch=batch, forward_only=True
+        )
 
         self.model.finish_validation_step()
         return loss_mean, metrics
@@ -124,7 +138,9 @@ class Trainer:
             # for stable diffusion logging
             if IMAGE_CAPTION_KEY in metrics:
                 images, captions = metrics.pop(IMAGE_CAPTION_KEY)
-                self.logger.log_image(key="validation images", images=images, caption=captions)
+                self.logger.log_image(
+                    key="validation images", images=images, caption=captions
+                )
 
             loss_means.append(loss_mean)
             for k, v in metrics.items():
@@ -144,7 +160,9 @@ class Trainer:
         self.model.prepare_for_training_step()
 
         # NOTE: assume backward is called on the loss already
-        loss_mean, metrics = self.model.get_loss_and_metrics(batch=batch, forward_only=False)
+        loss_mean, metrics = self.model.get_loss_and_metrics(
+            batch=batch, forward_only=False
+        )
 
         self.model.finish_training_step()
 
@@ -164,12 +182,17 @@ class Trainer:
 
     @torch.no_grad()
     def run_generation(self, batch):
-        return self.model.infer({"text": batch["contexts"], "length": batch["context_lengths"]})
+        return self.model.infer(
+            {"text": batch["contexts"], "length": batch["context_lengths"]}
+        )
 
     def train(self):
-        if (not isinstance(self.train_dataloader.batch_sampler, MegatronPretrainingRandomBatchSampler)) and (
-            self.cfg.max_epochs is not None and self.cfg.max_epochs > 1
-        ):
+        if (
+            not isinstance(
+                self.train_dataloader.batch_sampler,
+                MegatronPretrainingRandomBatchSampler,
+            )
+        ) and (self.cfg.max_epochs is not None and self.cfg.max_epochs > 1):
             # if you use MegatronPretrainingBatchSampler as the batch_sampler passed to your train dataloader (in builders.py)
             # then each epoch will repeat all your samples in the same order as the previous epoch, there is no shuffling
             # to fix this, you should use MegatronPretrainingRandomBatchSampler instead, which alleviates this issue and allows
@@ -195,7 +218,8 @@ class Trainer:
 
         for _ in epoch_iter:
             num_steps_in_epoch = min(
-                self.max_steps - self.step, self.num_steps_per_epoch - self.step % self.num_steps_per_epoch
+                self.max_steps - self.step,
+                self.num_steps_per_epoch - self.step % self.num_steps_per_epoch,
             )
             loop_iter = range(num_steps_in_epoch)
 
@@ -203,7 +227,11 @@ class Trainer:
                 return  # training ended
 
             global_pbar = tqdm(
-                self.train_dataloader, initial=self.step, total=self.max_steps, leave=True, desc="Training steps"
+                self.train_dataloader,
+                initial=self.step,
+                total=self.max_steps,
+                leave=True,
+                desc="Training steps",
             )
 
             for _, batch in zip(loop_iter, global_pbar):
@@ -219,7 +247,9 @@ class Trainer:
                 metrics["step_time"] = train_step_time
                 metrics["epoch"] = self.epoch + 1
                 self.logger.log_metrics(
-                    metrics, step=self.step, prefix="train/",
+                    metrics,
+                    step=self.step,
+                    prefix="train/",
                 )
                 metrics = {f"train_{k}": v for k, v in metrics.items()}
 
@@ -251,7 +281,9 @@ class Trainer:
                     self.save(metrics, is_train_end=is_train_end)
 
                 if run_time_exceeded:
-                    logging.info(f"Time limit given by run_timer={self.run_timer} reached. Stopping run")
+                    logging.info(
+                        f"Time limit given by run_timer={self.run_timer} reached. Stopping run"
+                    )
                     return
 
                 metrics.clear()
@@ -265,10 +297,14 @@ class Trainer:
         if extra_candidates is None:
             extra_candidates = {}
 
-        monitor_candidates = {k: torch.tensor(v, dtype=torch.int32) for k, v in self.state_dict().items()}
+        monitor_candidates = {
+            k: torch.tensor(v, dtype=torch.int32) for k, v in self.state_dict().items()
+        }
         monitor_candidates.update(extra_candidates)
 
-        self.ckpt_callback.custom_save(monitor_candidates=monitor_candidates, is_train_end=is_train_end)
+        self.ckpt_callback.custom_save(
+            monitor_candidates=monitor_candidates, is_train_end=is_train_end
+        )
 
     def set_max_steps(self):
         self.max_steps = self.num_steps_per_epoch * self.cfg.max_epochs
@@ -290,7 +326,9 @@ class Trainer:
         loaded_values = [self.step, self.consumed_samples]
 
         # make sure everyone loaded the same checkpoint as rank 0
-        to_broadcast = torch.tensor(loaded_values, dtype=torch.float32, device=torch.cuda.current_device())
+        to_broadcast = torch.tensor(
+            loaded_values, dtype=torch.float32, device=torch.cuda.current_device()
+        )
         torch.distributed.broadcast(to_broadcast, 0)
 
         assert loaded_values == to_broadcast.tolist()

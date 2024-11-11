@@ -6,23 +6,26 @@ from transformers import AutoTokenizer, TrainingArguments, default_data_collator
 
 import numpy as np
 
-from pdb import set_trace
-
 from transformers import set_seed
 from file_utils import get_file
-from mlperf_logging_utils import ClmLogger, MLPerfCallback
+from mlperf_logging_utils import MLPerfCallback
 
 from clm_datasets import get_datasets, process_datasets
+
 USE_CUDA = torch.cuda.is_available()  # os.environ.get('USE_CUDA', False)
 
+OmegaConf.register_new_resolver("multiply", lambda x, y: x * y, replace=True)
+
 if not USE_CUDA:
-    from transformers import Trainer, logging
+    # from transformers import Trainer, logging
+    from transformers import logging
+    from trainer_utils_tpu import Trainer
 
     from model_utils_tpu import (
         setup_xla,
         setup_model_optimizer,
         get_global_batch_size,
-        Tracker,
+        TensorBoardCallback,
     )
     from accelerate import Accelerator
 
@@ -33,8 +36,6 @@ if not USE_CUDA:
     OmegaConf.register_new_resolver(
         "path_join", lambda output_dir, exp_name: os.path.join(output_dir, exp_name)
     )
-
-    logger = logging.get_logger(__name__)
 else:
     import torch.multiprocessing as mp
     from nemo.core.config import hydra_runner
@@ -42,7 +43,7 @@ else:
         CustomLoggerWrapper,
         add_custom_checkpoint_callback,
         init_using_ptl,
-        extract_optimizer_scheduler_from_ptl_model
+        extract_optimizer_scheduler_from_ptl_model,
     )
     from model_utils_gpu import (
         setup_distributed,
@@ -55,7 +56,6 @@ else:
     from trainer_utils_gpu import Trainer
     from nemo_aligner.utils.distributed import Timer
 
-    OmegaConf.register_new_resolver("multiply", lambda x, y: x * y, replace=True)
     OmegaConf.register_new_resolver("int_div", lambda x, y: x // y, replace=True)
 
     mp.set_start_method("spawn", force=True)
@@ -77,6 +77,8 @@ def hydra_decorator(config_path, config_name):
 def main(config: DictConfig):
     if USE_CUDA:
         from nemo.utils import logging as logger
+    else:
+        logger = logging.get_logger(__name__)
 
     OmegaConf.resolve(config)
     set_seed(config.seed)
@@ -85,26 +87,14 @@ def main(config: DictConfig):
     if USE_CUDA:
         setup_distributed(config)
 
-    trainer_args = TrainingArguments(
-        output_dir=config.run_dir,
-        per_device_train_batch_size=config.per_device_train_batch_size,
-        per_device_eval_batch_size=config.per_device_eval_batch_size,
-        gradient_accumulation_steps=config.gradient_accumulation_steps,
-        max_grad_norm=config.max_grad_norm,
-        num_train_epochs=1,
-        evaluation_strategy="steps",
-        save_strategy="no",
-        max_steps=config.max_steps,
-        eval_steps=config.eval_frequency,
-        eval_delay=0,
-        logging_strategy="no",
-        logging_steps=config.report_metrics_freq,
-        report_to="tensorboard",
-        seed=config.seed,
-        dataloader_drop_last=True,
-        remove_unused_columns=False,
-        prediction_loss_only=True,
-        label_names=["labels"],
+    if config.eval_frequency == -1:
+        config.eval_frequency = int(
+            np.ceil(24576 * 2048 / config.max_length / config.global_train_batch_size)
+        )
+    logger.info(f"{config.eval_frequency=}")
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        config.model.name_or_path, add_eos_token=False, add_bos_token=False
     )
 
     if not USE_CUDA:
@@ -114,10 +104,8 @@ def main(config: DictConfig):
 
         logger.info(f"log tensorboard to {os.path.join(config.run_dir, 'tensorboard')}")
         accelerator = Accelerator(log_with="tensorboard", project_dir=config.run_dir)
-        tracker = Tracker(config, accelerator, logger)
         setup_xla(config)
 
-        tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
         model, optimizer, scheduler = setup_model_optimizer(config)
 
         if tokenizer.vocab_size != model.config.vocab_size:
@@ -135,61 +123,36 @@ def main(config: DictConfig):
             config.model.precision = config.trainer.precision
 
         model, _, _ = setup_model_optimizer(config, megatron_trainer)
-        tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
 
         with open_dict(config):
             # overwrite the model config with the config from the checkpoint
             config.model.encoder_seq_length = model.cfg.encoder_seq_length
-   
+
     raw_datasets = get_datasets(config)
     datasets = process_datasets(raw_datasets, tokenizer, config)
     logger.info(f"{datasets=}")
-    train_dataset, eval_dataset = datasets['train'], datasets['validation']
+    train_dataset, eval_dataset = datasets["train"], datasets["validation"]
     if USE_CUDA:
-        train_dataset, eval_dataset, train_ds, _ = get_input_pipeline(config, train_dataset, eval_dataset, tokenizer, model.tokenizer)
+        train_dataset, eval_dataset, train_ds, _ = get_input_pipeline(
+            config, train_dataset, eval_dataset, tokenizer, model.tokenizer
+        )
         tokenizer = model.tokenizer
         # initialize optimizer states
         init_using_ptl(megatron_trainer, model, train_dataset, train_ds)
         optimizer, scheduler = extract_optimizer_scheduler_from_ptl_model(model)
 
-    clmlogger = ClmLogger(target_eval_loss=0)
-
-    def preprocess_logits_for_metrics(logits, labels):
-        if isinstance(logits, tuple):
-            # Depending on the model and config, logits may contain extra tensors,
-            # like past_key_values, but logits always come first
-            logits = logits[0]
-        return logits
-
-
-    def compute_metrics(eval_preds):
-        logits, labels = eval_preds
-        # Flatten the tokens
-        logits = logits[..., :-1, :].contiguous()
-        labels = labels[..., 1:].contiguous()
-        loss_fct = nn.CrossEntropyLoss()
-        logits = logits.view(-1, logits.shape[-1])
-        labels = labels.view(-1)
-        # Enable model parallelism
-        labels = labels.to(logits.device)
-        loss = loss_fct(logits, labels)
-        return {
-            'eval_loss': loss,
-        }
-
     # Initialize our Trainer
     trainer = Trainer(
         model=model,
-        args=trainer_args,
+        config=config,
         tokenizer=tokenizer,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        optimizers=[optimizer, scheduler],
+        optimizer=optimizer,
+        scheduler=scheduler,
         # Data collator will default to DataCollatorWithPadding, so we change it.
-        compute_metrics=None,
         data_collator=default_data_collator,
-        # callbacks=[MLPerfCallback(clmlogger, len(train_dataset), len(eval_dataset))],
-        callbacks=[MLPerfCallback(clmlogger, 100, 10)],
+        callbacks=[MLPerfCallback(config), TensorBoardCallback(config)],
     )
     if USE_CUDA:
         ckpt_callback = add_custom_checkpoint_callback(megatron_trainer, model)
@@ -204,9 +167,6 @@ def main(config: DictConfig):
 
     trainer.train()
 
-def _mp_fn(index):
-    # For xla_spawn (TPUs)
-    main()
 
 if __name__ == "__main__":
     main()

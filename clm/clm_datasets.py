@@ -1,30 +1,55 @@
-from datasets import load_dataset, Features, Value
+import os
+from datasets import load_dataset, Features, Value, concatenate_datasets
 from transformers.testing_utils import CaptureLogger
 import transformers
 from itertools import chain
+from transformers import logging
+
+logger = logging.get_logger(__name__)
 
 
 def get_datasets(config):
     # Downloading and loading a dataset from the hub.
     if config.dataset.dataset_name == "c4_mlperf":
-        data_files = {
-            "train": [f"hf://datasets/allenai/c4/en/c4-train.{i:05d}-of-01024.json.gz" for i in range(768, 1024)],
-            "validation": [f"hf://datasets/allenai/c4/en/c4-validation.{i:05d}-of-00008.json.gz" for i in range(1)],  # TODO change
+        train_data_files = {
+            "train": [
+                f'{os.path.join(config.dataset.train_dataset_path, f"c4-train.{i:05d}-of-01024.json")}'
+                for i in range(768, 1024)
+            ],
+        }
+        eval_data_files = {
+            "validation": [
+                f'{os.path.join(config.dataset.eval_dataset_path, "c4-validation_24567exp.json")}'
+            ],
         }
         features = Features(
             {
-                'text': Value(dtype='string', id=None),
-                'timestamp': Value(dtype='string', id=None),
-                'url': Value(dtype='string', id=None),
+                "text": Value(dtype="string", id=None),
+                "timestamp": Value(dtype="string", id=None),
+                "url": Value(dtype="string", id=None),
             }
         )
-        raw_datasets = load_dataset(
-            "json",
-            data_files=data_files,
-            features=features,
-            cache_dir=config.cache_local_dir,
-            streaming=config.dataset.streaming,
-        )
+        raw_datasets = {
+            "train": load_dataset(
+                "json",
+                data_files=train_data_files,
+                features=features,
+                cache_dir=config.cache_local_dir,
+                streaming=config.dataset.streaming,
+                split="train",
+            ),
+            "validation": load_dataset(
+                "json",
+                data_files=eval_data_files,
+                features=features,
+                cache_dir=config.cache_local_dir,
+                split="validation",
+            ),
+        }
+        if config.n_eval_examples:
+            raw_datasets["validation"] = raw_datasets["validation"].select(
+                range(config.n_eval_examples)
+            )
     else:
         raw_datasets = load_dataset(
             config.dataset.dataset_name,
@@ -41,7 +66,32 @@ def process_datasets(raw_datasets, tokenizer, config):
     text_column_name = "text" if "text" in column_names else column_names[0]
 
     # since this will be pickled to avoid _LazyModule error in Hasher force logger loading before tokenize_function
-    tok_logger = transformers.utils.logging.get_logger("transformers.tokenization_utils_base")
+    tok_logger = transformers.utils.logging.get_logger(
+        "transformers.tokenization_utils_base"
+    )
+
+    def process_datasets_function(src_datasets, function, desc):
+        tgt_datasets = {}
+        for key in src_datasets.keys():
+            # use validation batch_size to avoid dropping remainders in group_text
+            batch_size = 24567 if key == "validation" else 4096
+            # only apply streaming in train dataset
+            if key == "train" and config.dataset.streaming:
+                tgt_datasets[key] = src_datasets[key].map(
+                    function,
+                    batched=True,
+                    batch_size=batch_size,
+                )
+            else:
+                tgt_datasets[key] = src_datasets[key].map(
+                    function,
+                    batched=True,
+                    batch_size=batch_size,
+                    num_proc=config.dataset.num_proc,
+                    load_from_cache_file=config.dataset.load_from_cache_file,
+                    desc=desc,
+                )
+        return tgt_datasets
 
     def tokenize_function(examples):
         with CaptureLogger(tok_logger) as cl:
@@ -53,32 +103,30 @@ def process_datasets(raw_datasets, tokenizer, config):
                 " before being passed to the model."
             )
         return output
-    
-    if not config.dataset.streaming:
-        tokenized_datasets = raw_datasets.map(
-            tokenize_function,
-            batched=True,
-            num_proc=config.dataset.num_proc,
-            remove_columns=column_names,
-            load_from_cache_file=config.dataset.load_from_cache_file,
-            desc="Running tokenizer on dataset",
-        )
-    else:
-        tokenized_datasets = raw_datasets.map(
-            tokenize_function,
-            batched=True,
-            remove_columns=column_names,
-        )
-    
+
+    tokenized_datasets = process_datasets_function(
+        raw_datasets, tokenize_function, desc="Running tokenizer on dataset"
+    )
+    tokenized_datasets = {
+        key: dataset.remove_columns(column_names)
+        for key, dataset in tokenized_datasets.items()
+    }
+
     block_size = config.max_length
+
     # Main data processing function that will concatenate all texts from our dataset and generate chunks of block_size.
     def group_texts(examples):
         # Concatenate all texts.
         concatenated_examples = {k: list(chain(*examples[k])) for k in examples.keys()}
         total_length = len(concatenated_examples[list(examples.keys())[0]])
-        # We drop the small remainder, and if the total_length < block_size  we exclude this batch and return an empty dict.
-        # We could add padding if the model supported it instead of this drop, you can customize this part to your needs.
-        total_length = (total_length // block_size) * block_size
+
+        if total_length % block_size != 0:
+            pad_length = (total_length // block_size + 1) * block_size - total_length
+            for k in concatenated_examples.keys():
+                concatenated_examples[k].extend([config.pad_token_id] * pad_length)
+            total_length += pad_length
+        else:
+            total_length = (total_length // block_size) * block_size
         # Split by chunks of max_len.
         result = {
             k: [t[i : i + block_size] for i in range(0, total_length, block_size)]
@@ -87,23 +135,38 @@ def process_datasets(raw_datasets, tokenizer, config):
         result["labels"] = result["input_ids"].copy()
         return result
 
-    if not config.dataset.streaming:
-        lm_datasets = tokenized_datasets.map(
-            group_texts,
-            batched=True,
-            num_proc=config.dataset.num_proc,
-            load_from_cache_file=config.dataset.load_from_cache_file,
-            desc=f"Grouping texts in chunks of {block_size}",
+    lm_datasets = process_datasets_function(
+        tokenized_datasets,
+        group_texts,
+        desc=f"Grouping texts in chunks of {block_size}",
+    )
+    if config.shuffle:
+        lm_datasets["train"] = lm_datasets["train"].shuffle(
+            seed=config.seed, buffer_size=config.dataset.shuffle_buffer_size
         )
-    else:
-        lm_datasets = tokenized_datasets.map(
-            group_texts,
-            batched=True,
+
+    # pad to multiple of batch size in eval/validation dataset
+    if len(lm_datasets["validation"]) % config.global_eval_batch_size > 0:
+        num_eval_batches = (
+            len(lm_datasets["validation"]) // config.global_eval_batch_size + 1
         )
-    
+        pad_number = num_eval_batches * config.global_eval_batch_size - len(
+            lm_datasets["validation"]
+        )
+        logger.info(
+            f"Eval data has {len(lm_datasets['validation'])} entries, padding now with "
+            f"{pad_number} extra entries to get {num_eval_batches * config.global_eval_batch_size} batches."
+        )
+
+        def mask_pad(examples):
+            examples["labels"] = [config.pad_token_id] * len(examples["labels"])
+            return examples
+
+        pad_validation_dataset = (
+            lm_datasets["validation"].select(range(pad_number)).map(mask_pad)
+        )
+        lm_datasets["validation"] = concatenate_datasets(
+            [lm_datasets["validation"], pad_validation_dataset]
+        )
+
     return lm_datasets
-    
-        
-
-
-
