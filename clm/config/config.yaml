@@ -82,6 +82,8 @@ local_compile_cache_dir: null
 
 # tensor_parallelism and fsdp parallelism would be num_devices / tensor_parallelism
 tensor_parallelism: 1
+context_parallelism: 1
+pipeline_parallelism: 1
 
 # report frequency of train step
 report_metrics_freq: 1
