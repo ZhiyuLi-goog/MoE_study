@@ -11,6 +11,7 @@ from transformers import (
     AutoTokenizer,
     TrainingArguments,
     default_data_collator,
+    logging,
     set_seed,
 )
 
@@ -19,7 +20,6 @@ USE_CUDA = torch.cuda.is_available()  # os.environ.get('USE_CUDA', False)
 OmegaConf.register_new_resolver("multiply", lambda x, y: x * y, replace=True)
 
 if not USE_CUDA:
-    # from transformers import Trainer, logging
     from model_utils_tpu import (
         TensorBoardCallback,
         get_global_batch_size,
@@ -37,8 +37,6 @@ if not USE_CUDA:
         "path_join", lambda output_dir, exp_name: os.path.join(output_dir, exp_name)
     )
 else:
-    import logging
-
     import torch.multiprocessing as mp
     from model_utils_gpu import setup_distributed, setup_model_and_trainer
     from nemo.collections import llm
@@ -81,6 +79,8 @@ def main(config: DictConfig):
     )
 
     clmlogger = ClmLogger(target_eval_loss=0)
+    tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
+
     if not USE_CUDA:
         config_path = os.path.join(config.run_dir, "config.yaml")
         with get_file(config_path, "w") as f:
@@ -89,7 +89,6 @@ def main(config: DictConfig):
         logger.info(f"log tensorboard to {os.path.join(config.run_dir, 'tensorboard')}")
         accelerator = Accelerator(log_with="tensorboard", project_dir=config.run_dir)
         setup_xla(config)
-
         model, optimizer, scheduler = setup_model_optimizer(config)
 
         if tokenizer.vocab_size != model.config.vocab_size:
@@ -97,16 +96,38 @@ def main(config: DictConfig):
                 f"Found mismatch between {tokenizer.vocab_size=} and {model.config.vocab_size}"
             )
     else:
+        if "adam" in config.optimizer.lower():
+            optimizer_name = "adam"
+        else:
+            raise ValueError("Unsupported optimizer for GPU run")
+
+        data_parallel_size = torch.distributed.get_world_size() // (
+            config.tensor_parallelism
+            * config.pipeline_parallelism
+            * config.context_parallelism
+        )
+
+        config.global_train_batch_size = int(
+            config.per_device_train_batch_size
+            * config.gradient_accumulation_steps
+            * data_parallel_size
+        )
+
+        config.global_eval_batch_size = config.global_train_batch_size
+
         model, trainer, optimizer = setup_model_and_trainer(
+            model_name_or_path=config.model.name_or_path,
             input_sequence_length=config.model.max_sequence_length,
-            global_batch_size=config.trainer.global_batch_size,
-            max_training_tokens=config.trainer.max_token_steps,
-            nodes=config.trainer.nodes,
-            tp_size=config.trainer.tensor_parallel_size,
-            pp_size=config.trainer.pipeline_parallel_size,
-            cp_size=config.trainer.context_parallel_size,
-            learning_rate=config.optimizer.lr,
+            global_batch_size=config.global_train_batch_size,
+            nodes=torch.distributed.get_world_size() // torch.cuda.device_count(),
+            tp_size=config.tensor_parallelism,
+            pp_size=config.pipeline_parallelism,
+            cp_size=config.context_parallelism,
+            learning_rate=config.lr,
+            optimizer_name=optimizer_name,
             tokenizer_name_or_path=config.model.name_or_path,
+            scheduler=config.sched,
+            trainer_args=trainer_args,
             # callbacks=[MLPerfCallback(clmlogger, 100, 10)],
             callbacks=[],
         )
@@ -118,7 +139,15 @@ def main(config: DictConfig):
     if USE_CUDA:
         from clm_datasets import DatasetModule
 
-        dataset = DatasetModule(train_dataset, eval_dataset)
+        dataset = DatasetModule(
+            train_dataset,
+            eval_dataset,
+            tokenizer,
+            micro_batch_size=config.per_device_train_batch_size,
+            global_batch_size=config.global_train_batch_size,
+            seq_len=config.model.max_sequence_length,
+        )
+
         llm.train(
             model=model,
             data=dataset,

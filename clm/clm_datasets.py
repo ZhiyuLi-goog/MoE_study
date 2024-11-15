@@ -1,15 +1,16 @@
 import os
 from itertools import chain
 
+import pytorch_lightning as pl
+import torch
 import transformers
 from datasets import Features, Value, concatenate_datasets, load_dataset
+from nemo.lightning.pytorch.plugins import MegatronDataSampler
+from torch.utils.data import DataLoader
 from transformers import logging
 from transformers.testing_utils import CaptureLogger
 
 logger = logging.get_logger(__name__)
-
-import pytorch_lightning as pl
-from torch.utils.data import DataLoader
 
 
 def get_datasets(config):
@@ -135,7 +136,16 @@ def process_datasets(raw_datasets, tokenizer, config):
             k: [t[i : i + block_size] for i in range(0, total_length, block_size)]
             for k, t in concatenated_examples.items()
         }
+
+        result = {k: [torch.tensor(t) for t in v] for k, v in result.items()}
+
         result["labels"] = result["input_ids"].copy()
+        result["tokens"] = result["input_ids"]
+        result["loss_mask"] = [torch.ones_like(x) for x in result["input_ids"]]
+        result["position_ids"] = [
+            torch.arange(ids.shape[0]) for ids in result["input_ids"]
+        ]
+
         return result
 
     lm_datasets = process_datasets_function(
@@ -172,19 +182,40 @@ def process_datasets(raw_datasets, tokenizer, config):
             [lm_datasets["validation"], pad_validation_dataset]
         )
 
-    return lm_datasets
+    return lm_datasets.with_format("torch")
 
 
 class DatasetModule(pl.LightningDataModule):
-    def __init__(self, train_dataset, eval_dataset):
+    def __init__(
+        self,
+        train_dataset,
+        eval_dataset,
+        tokenizer,
+        micro_batch_size: int,
+        global_batch_size: int,
+        seq_len: int,
+    ):
+        super().__init__()
+
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
+        self.tokenizer = tokenizer
+        self.seq_len = seq_len
+        self.micro_batch_size = micro_batch_size
+        self.global_batch_size = global_batch_size
+
+        self.data_sampler = MegatronDataSampler(
+            seq_len=self.seq_len,
+            micro_batch_size=self.micro_batch_size,
+            global_batch_size=self.global_batch_size,
+            rampup_batch_size=None,
+        )
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=1)
+        return DataLoader(self.train_dataset, batch_size=self.micro_batch_size)
 
     def val_dataloader(self):
-        return DataLoader(self.eval_dataset, batch_size=1)
+        return DataLoader(self.eval_dataset, batch_size=self.micro_batch_size)
 
     def test_dataloader(self):
-        return DataLoader(self.eval_dataset, batch_size=1)
+        return DataLoader(self.eval_dataset, batch_size=self.micro_batch_size)
