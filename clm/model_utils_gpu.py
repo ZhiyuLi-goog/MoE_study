@@ -4,12 +4,13 @@ import torch
 from megatron.core.optimizer import OptimizerConfig
 from nemo import lightning as nl
 from nemo.collections import llm
+from nemo.collections.common.tokenizers import AutoTokenizer
 from nemo.collections.nlp.data.language_modeling.megatron.gpt_sft_chat_dataset import (
     get_prompt_template_example,
 )
 from nemo.utils import logging
 from omegaconf.omegaconf import OmegaConf, open_dict
-from transformers import AutoTokenizer, TrainingArguments
+from transformers import TrainingArguments
 
 
 def setup_distributed(config):
@@ -54,6 +55,7 @@ def setup_model_and_trainer(
     nodes: int,
     tp_size: int,
     pp_size: int,
+    vpp_size: int,
     cp_size: int,
     learning_rate: float,
     optimizer_name: str,
@@ -61,6 +63,7 @@ def setup_model_and_trainer(
     scheduler,
     trainer_args: TrainingArguments,
     *,
+    logger,
     callbacks: list,
 ):
     logging.info("loading model")
@@ -78,16 +81,19 @@ def setup_model_and_trainer(
     else:
         raise ValueError(f"Unknown model specified: {model_name_or_path}")
 
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path)
+    resume = nl.AutoResume(resume_from_path="/app/checkpoints/")
+    tokenizer = AutoTokenizer(pretrained_model_name=tokenizer_name_or_path)
     model = llm.MixtralModel(mixtral_config, tokenizer=tokenizer)
 
     ## initialize the strategy
     strategy = nl.MegatronStrategy(
         tensor_model_parallel_size=tp_size,
         pipeline_model_parallel_size=pp_size,
+        virtual_pipeline_model_parallel_size=vpp_size,
         sequence_parallel=True,
         context_parallel_size=cp_size,
         pipeline_dtype=torch.bfloat16,
+        ckpt_load_optimizer=False,
     )
 
     precision = nl.MegatronMixedPrecision(
@@ -129,17 +135,21 @@ def setup_model_and_trainer(
         strategy=strategy,
         plugins=precision,
         callbacks=callbacks,
-        logger=None,
+        logger=logger,
         enable_progress_bar=False,
         val_check_interval=trainer_args.eval_steps,
         log_every_n_steps=trainer_args.logging_steps,
         gradient_clip_val=trainer_args.max_grad_norm,
     )
 
+    logger.set_trainer(trainer)
+    logger.log_hyperparams(None)
+
     return (
         model,
         trainer,
         opt,
+        resume,
     )
 
 
