@@ -1,11 +1,15 @@
 import os
 
 import hydra
-import numpy as np
 import torch
 from clm_datasets import get_datasets, process_datasets
 from file_utils import get_file
-from mlperf_logging_utils import MLPerfCallback
+from mlperf_logging_utils import (
+    ClmLogger,
+    MetricsLogger,
+    MLPerfCallback,
+    MLPerfLightningCallback,
+)
 from omegaconf import DictConfig, OmegaConf, open_dict
 from transformers import (
     AutoTokenizer,
@@ -39,6 +43,7 @@ if not USE_CUDA:
 else:
     import torch.multiprocessing as mp
     from model_utils_gpu import setup_distributed, setup_model_and_trainer
+    from nemo import lightning as nl
     from nemo.collections import llm
     from trainer_utils_gpu import Trainer
 
@@ -114,26 +119,63 @@ def main(config: DictConfig):
         )
 
         config.global_eval_batch_size = config.global_train_batch_size
+        number_of_nodes = (
+            torch.distributed.get_world_size() // torch.cuda.device_count()
+        )
 
-        model, trainer, optimizer = setup_model_and_trainer(
+        metrics_logger = MetricsLogger(
+            clmlogger,
+            number_of_nodes,
+            config.global_train_batch_size,
+            config.lr,
+            config.model.max_sequence_length,
+        )
+
+        callbacks = [
+            MLPerfLightningCallback(
+                clmlogger,
+                config.global_train_batch_size,
+                config.model.max_sequence_length,
+            )
+        ]
+
+        if (
+            config.model.capacity_factor is not None
+            and config.model.capacity_factor > 0
+        ):
+            from nemo.lightning.pytorch.callbacks.moe_token_drop import (
+                MegatronTokenDropCallback,
+            )
+
+            callbacks.append(
+                MegatronTokenDropCallback(
+                    moe_expert_capacity_factor=config.model.expert_capacity
+                )
+            )
+
+        number_of_nodes = min(
+            1, torch.distributed.get_world_size() // torch.cuda.device_count()
+        )
+
+        model, trainer, optimizer, resume = setup_model_and_trainer(
             model_name_or_path=config.model.name_or_path,
             input_sequence_length=config.model.max_sequence_length,
             global_batch_size=config.global_train_batch_size,
-            nodes=torch.distributed.get_world_size() // torch.cuda.device_count(),
+            nodes=number_of_nodes,
             tp_size=config.tensor_parallelism,
             pp_size=config.pipeline_parallelism,
+            vpp_size=config.virtual_pipeline_parallelism,
             cp_size=config.context_parallelism,
             learning_rate=config.lr,
             optimizer_name=optimizer_name,
             tokenizer_name_or_path=config.model.name_or_path,
             scheduler=config.sched,
             trainer_args=trainer_args,
-            # callbacks=[MLPerfCallback(clmlogger, 100, 10)],
-            callbacks=[],
+            logger=metrics_logger,
+            callbacks=callbacks,
         )
     raw_datasets = get_datasets(config)
     datasets = process_datasets(raw_datasets, tokenizer, config)
-    logger.info(f"{datasets=}")
     train_dataset, eval_dataset = datasets["train"], datasets["validation"]
 
     if USE_CUDA:
@@ -148,12 +190,31 @@ def main(config: DictConfig):
             seq_len=config.model.max_sequence_length,
         )
 
+        ckpt = nl.ModelCheckpoint(
+            save_last=True,
+            save_top_k=True,
+            every_n_train_steps=100000,
+            always_save_context=False,
+            save_context_on_train_end=False,
+        )
+
+        nemo_logger = nl.NeMoLogger(
+            ckpt=ckpt,
+            name="mixtral-reference",
+            tensorboard=None,
+            wandb=None,
+            log_dir="/results",
+        )
+
         llm.train(
             model=model,
             data=dataset,
             trainer=trainer,
             tokenizer="data",
             optim=optimizer,
+            log=nemo_logger,
+            # log=None,
+            resume=resume,
         )
     else:
 
