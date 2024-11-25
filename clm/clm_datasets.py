@@ -14,12 +14,10 @@ def get_datasets(config):
     if config.dataset.dataset_name == "c4_mlperf":
         data_files = {
             "train": [
-                f"hf://datasets/allenai/c4/en/c4-train.{i:05d}-of-01024.json.gz"
-                for i in range(768, 1024)
+                f"en/c4-train.{i:05d}-of-01024.json.gz" for i in range(768, 1024)
             ],
             "validation": [
-                f"hf://datasets/allenai/c4/en/c4-validation.{i:05d}-of-00008.json.gz"
-                for i in range(1)
+                f"en/c4-validation.{i:05d}-of-00008.json.gz" for i in range(1)
             ],  # TODO change
         }
         features = Features(
@@ -30,7 +28,7 @@ def get_datasets(config):
             }
         )
         raw_datasets = load_dataset(
-            "json",
+            "allenai/c4",
             data_files=data_files,
             features=features,
             cache_dir=config.cache_local_dir,

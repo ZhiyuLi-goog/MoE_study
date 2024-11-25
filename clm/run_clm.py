@@ -96,7 +96,8 @@ def main(config: DictConfig):
     )
 
     clmlogger = ClmLogger(target_eval_loss=0)
-    tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
+    # tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
+    tokenizer = AutoTokenizer.from_pretrained("mistralai/Mixtral-8x7B-v0.1")
 
     if not USE_CUDA:
         config_path = os.path.join(config.run_dir, "config.yaml")
@@ -166,7 +167,7 @@ def main(config: DictConfig):
                 )
             )
 
-        number_of_nodes = min(
+        number_of_nodes = max(
             1, torch.distributed.get_world_size() // torch.cuda.device_count()
         )
 
@@ -177,7 +178,7 @@ def main(config: DictConfig):
             nodes=number_of_nodes,
             tp_size=config.tensor_parallelism,
             pp_size=config.pipeline_parallelism,
-            vpp_size=config.virtual_pipeline_parallelism,
+            vpp_size=None,  # config.virtual_pipeline_parallelism,
             cp_size=config.context_parallelism,
             learning_rate=config.lr,
             optimizer_name=optimizer_name,
