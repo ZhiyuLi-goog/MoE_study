@@ -1,25 +1,34 @@
-from datasets import load_dataset, Features, Value
-from transformers.testing_utils import CaptureLogger
-import transformers
 from itertools import chain
+
+import pytorch_lightning as pl
+import torch
+import transformers
+from datasets import Features, Value, load_dataset
+from nemo.lightning.pytorch.plugins import MegatronDataSampler
+from torch.utils.data import DataLoader
+from transformers.testing_utils import CaptureLogger
 
 
 def get_datasets(config):
     # Downloading and loading a dataset from the hub.
     if config.dataset.dataset_name == "c4_mlperf":
         data_files = {
-            "train": [f"hf://datasets/allenai/c4/en/c4-train.{i:05d}-of-01024.json.gz" for i in range(768, 1024)],
-            "validation": [f"hf://datasets/allenai/c4/en/c4-validation.{i:05d}-of-00008.json.gz" for i in range(1)],  # TODO change
+            "train": [
+                f"en/c4-train.{i:05d}-of-01024.json.gz" for i in range(768, 1024)
+            ],
+            "validation": [
+                f"en/c4-validation.{i:05d}-of-00008.json.gz" for i in range(1)
+            ],  # TODO change
         }
         features = Features(
             {
-                'text': Value(dtype='string', id=None),
-                'timestamp': Value(dtype='string', id=None),
-                'url': Value(dtype='string', id=None),
+                "text": Value(dtype="string", id=None),
+                "timestamp": Value(dtype="string", id=None),
+                "url": Value(dtype="string", id=None),
             }
         )
         raw_datasets = load_dataset(
-            "json",
+            "allenai/c4",
             data_files=data_files,
             features=features,
             cache_dir=config.cache_local_dir,
@@ -41,7 +50,9 @@ def process_datasets(raw_datasets, tokenizer, config):
     text_column_name = "text" if "text" in column_names else column_names[0]
 
     # since this will be pickled to avoid _LazyModule error in Hasher force logger loading before tokenize_function
-    tok_logger = transformers.utils.logging.get_logger("transformers.tokenization_utils_base")
+    tok_logger = transformers.utils.logging.get_logger(
+        "transformers.tokenization_utils_base"
+    )
 
     def tokenize_function(examples):
         with CaptureLogger(tok_logger) as cl:
@@ -53,7 +64,7 @@ def process_datasets(raw_datasets, tokenizer, config):
                 " before being passed to the model."
             )
         return output
-    
+
     if not config.dataset.streaming:
         tokenized_datasets = raw_datasets.map(
             tokenize_function,
@@ -69,8 +80,9 @@ def process_datasets(raw_datasets, tokenizer, config):
             batched=True,
             remove_columns=column_names,
         )
-    
+
     block_size = config.max_length
+
     # Main data processing function that will concatenate all texts from our dataset and generate chunks of block_size.
     def group_texts(examples):
         # Concatenate all texts.
@@ -84,7 +96,16 @@ def process_datasets(raw_datasets, tokenizer, config):
             k: [t[i : i + block_size] for i in range(0, total_length, block_size)]
             for k, t in concatenated_examples.items()
         }
+
+        result = {k: [torch.tensor(t) for t in v] for k, v in result.items()}
+
         result["labels"] = result["input_ids"].copy()
+        result["tokens"] = result["input_ids"]
+        result["loss_mask"] = [torch.ones_like(x) for x in result["input_ids"]]
+        result["position_ids"] = [
+            torch.arange(ids.shape[0]) for ids in result["input_ids"]
+        ]
+
         return result
 
     if not config.dataset.streaming:
@@ -100,10 +121,41 @@ def process_datasets(raw_datasets, tokenizer, config):
             group_texts,
             batched=True,
         )
-    
-    return lm_datasets
-    
-        
+
+    return lm_datasets.with_format("torch")
 
 
+class DatasetModule(pl.LightningDataModule):
+    def __init__(
+        self,
+        train_dataset,
+        eval_dataset,
+        tokenizer,
+        micro_batch_size: int,
+        global_batch_size: int,
+        seq_len: int,
+    ):
+        super().__init__()
 
+        self.train_dataset = train_dataset
+        self.eval_dataset = eval_dataset
+        self.tokenizer = tokenizer
+        self.seq_len = seq_len
+        self.micro_batch_size = micro_batch_size
+        self.global_batch_size = global_batch_size
+
+        self.data_sampler = MegatronDataSampler(
+            seq_len=self.seq_len,
+            micro_batch_size=self.micro_batch_size,
+            global_batch_size=self.global_batch_size,
+            rampup_batch_size=None,
+        )
+
+    def train_dataloader(self):
+        return DataLoader(self.train_dataset, batch_size=self.micro_batch_size)
+
+    def val_dataloader(self):
+        return DataLoader(self.eval_dataset, batch_size=self.micro_batch_size)
+
+    def test_dataloader(self):
+        return DataLoader(self.eval_dataset, batch_size=self.micro_batch_size)
