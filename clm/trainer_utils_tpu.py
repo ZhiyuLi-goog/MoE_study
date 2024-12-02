@@ -233,7 +233,7 @@ class Trainer:
                         self.model.parameters(), self.config.max_grad_norm
                     )
                     logs["train/grad_norm"] = grad_norm.detach()
-                self.optimizer.step()
+                xm.optimizer_step(self.optimizer)
                 self.optimizer.zero_grad()
                 self.scheduler.step()
 
