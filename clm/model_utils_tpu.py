@@ -142,7 +142,16 @@ def prepare_model(model, config):
 
         for i, block in enumerate(model.model.layers):
             model.model.layers[i] = checkpoint_module(block)
+    
+    # Patch `xm.optimizer_step` should not reduce gradients in this case,
+    # as FSDP does not need gradient reduction over sharded parameters.
+    def patched_optimizer_step(optimizer, barrier=False, optimizer_args={}):
+        loss = optimizer.step(**optimizer_args)
+        if barrier:
+            xm.mark_step()
+        return loss
 
+    xm.optimizer_step = patched_optimizer_step
     return model
 
 
