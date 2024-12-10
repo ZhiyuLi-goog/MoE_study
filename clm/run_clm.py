@@ -119,6 +119,10 @@ def main(config: DictConfig):
             * data_parallel_size
         )
 
+        print(
+            f"DEBUG BS: {torch.distributed.get_world_size()}, {data_parallel_size}, {config.global_train_batch_size}"
+        )
+
         config.global_eval_batch_size = config.global_train_batch_size
         number_of_nodes = (
             torch.distributed.get_world_size() // torch.cuda.device_count()
@@ -223,7 +227,7 @@ def main(config: DictConfig):
             if isinstance(logits, tuple):
                 # Depending on the model and config, logits may contain extra tensors,
                 # like past_key_values, but logits always come first
-                logits = logits[0]
+                logits = logits
             return logits
 
         # Initialize our Trainer

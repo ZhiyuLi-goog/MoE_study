@@ -6,7 +6,7 @@ import torch
 import transformers
 from datasets import Features, Value, concatenate_datasets, load_dataset
 from nemo.lightning.pytorch.plugins import MegatronDataSampler
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, default_collate
 from transformers import logging
 from transformers.testing_utils import CaptureLogger
 
@@ -65,7 +65,33 @@ def get_datasets(config):
     return raw_datasets
 
 
-def process_datasets(raw_datasets, tokenizer, config):
+def generate_attention_mask(examples):
+    default_seq_length = 32768
+    default_attention_mask = torch.tril(
+        torch.ones((default_seq_length, default_seq_length), device="cpu")
+    )
+
+    attention_masks = []
+    for sequence in examples["input_ids"]:
+        # sequence = example["input_ids"]
+        if isinstance(sequence, torch.Tensor):
+            sequence_length = sequence.shape[0]
+        else:
+            sequence_length = len(sequence)
+
+        if sequence_length == default_seq_length:
+            attention_mask = default_attention_mask
+        else:
+            attention_mask = torch.tril(
+                torch.ones((sequence_length, sequence_length), device="cpu")
+            )
+
+        attention_masks.append(attention_mask)
+    examples["attention_mask"] = attention_masks
+    return examples
+
+
+def process_datasets(raw_datasets, tokenizer, config, use_cuda: bool = True):
     # First we tokenize all the texts.
     column_names = list(raw_datasets["train"].features)
     text_column_name = "text" if "text" in column_names else column_names[0]
@@ -137,7 +163,11 @@ def process_datasets(raw_datasets, tokenizer, config):
             for k, t in concatenated_examples.items()
         }
 
-        result = {k: [torch.tensor(t) for t in v] for k, v in result.items()}
+        result = {
+            k: [torch.tensor(t) for t in v]
+            for k, v in result.items()
+            if k != "attention_mask"
+        }
 
         result["labels"] = result["input_ids"].copy()
         result["tokens"] = result["input_ids"]
@@ -182,6 +212,15 @@ def process_datasets(raw_datasets, tokenizer, config):
             [lm_datasets["validation"], pad_validation_dataset]
         )
 
+    # if use_cuda:
+    #    lm_datasets = lm_datasets.map(
+    #        generate_attention_mask,
+    #        batched=True,
+    #        # num_proc=config.dataset.num_proc,
+    #        load_from_cache_file=config.dataset.load_from_cache_file,
+    #        desc=f"Adding attention mask",
+    #    )
+
     return lm_datasets.with_format("torch")
 
 
@@ -212,10 +251,31 @@ class DatasetModule(pl.LightningDataModule):
         )
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.micro_batch_size)
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.micro_batch_size,
+            collate_fn=DatasetModule.collate_fn,
+        )
 
     def val_dataloader(self):
-        return DataLoader(self.eval_dataset, batch_size=self.micro_batch_size)
+        return DataLoader(
+            self.eval_dataset,
+            batch_size=self.micro_batch_size,
+            collate_fn=DatasetModule.collate_fn,
+        )
 
     def test_dataloader(self):
-        return DataLoader(self.eval_dataset, batch_size=self.micro_batch_size)
+        return DataLoader(
+            self.eval_dataset,
+            batch_size=self.micro_batch_size,
+            collate_fn=DatasetModule.collate_fn,
+        )
+
+    @staticmethod
+    def collate_fn(batch):
+        return default_collate(batch)
+
+        result = {}
+        for key in batch[0].keys():
+            result[key] = torch.stack([item[key] for item in batch])
+        return result
