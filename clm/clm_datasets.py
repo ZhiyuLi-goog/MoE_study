@@ -4,6 +4,9 @@ from transformers.testing_utils import CaptureLogger
 import transformers
 from itertools import chain
 from transformers import logging
+from omegaconf import DictConfig
+from transformers import AutoTokenizer
+import hydra
 
 logger = logging.get_logger(__name__)
 
@@ -170,3 +173,19 @@ def process_datasets(raw_datasets, tokenizer, config):
         )
 
     return lm_datasets
+
+
+@hydra.main(config_path="config", config_name="config")
+def main(config: DictConfig):
+    tokenizer = AutoTokenizer.from_pretrained(
+        config.model.name_or_path, add_eos_token=False, add_bos_token=False
+    )
+    raw_datasets = get_datasets(config)
+    lm_datasets = process_datasets(raw_datasets, tokenizer, config)
+
+    for i, batch in enumerate(lm_datasets["validation"]):
+        print(f"{i=}: {batch=}")
+
+
+if __name__ == "__main__":
+    main()
