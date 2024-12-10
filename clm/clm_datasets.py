@@ -2,12 +2,13 @@ import os
 from itertools import chain
 
 import pytorch_lightning as pl
-import torch
 import transformers
 from datasets import Features, Value, concatenate_datasets, load_dataset
-from torch.utils.data import DataLoader, default_collate
 from transformers import logging
 from transformers.testing_utils import CaptureLogger
+from omegaconf import DictConfig
+from transformers import AutoTokenizer
+import hydra
 
 logger = logging.get_logger(__name__)
 
@@ -228,3 +229,22 @@ def process_datasets(raw_datasets, tokenizer, config, use_cuda: bool = True):
         )
 
     return lm_datasets
+
+
+@hydra.main(config_path="config", config_name="config")
+def main(config: DictConfig):
+    tokenizer = AutoTokenizer.from_pretrained(
+        config.model.name_or_path,
+        add_eos_token=False,
+        add_bos_token=False,
+        use_fast=False,
+    )
+    raw_datasets = get_datasets(config)
+    lm_datasets = process_datasets(raw_datasets, tokenizer, config)
+
+    for i, batch in enumerate(lm_datasets["validation"]):
+        print(f"{i=}: {batch=}")
+
+
+if __name__ == "__main__":
+    main()
