@@ -77,8 +77,7 @@ def main(config: DictConfig):
     logger.info(f"{datasets=}")
     train_dataset, eval_dataset = datasets["train"], datasets["validation"]
 
-    batch = eval_dataset.with_format("torch")
-    batch = batch.to(xm.xla_device())
+    batch = eval_dataset.with_format("torch", device=xm.xla_device())[0]
     labels = batch.pop("labels")
     outputs = model(**batch).logits
     logits = outputs.logits
