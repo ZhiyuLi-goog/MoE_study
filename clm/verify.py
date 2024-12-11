@@ -19,7 +19,7 @@ import torch_xla.distributed.parallel_loader as pl
 
 from torch.nn import CrossEntropyLoss
 
-torch.set_printoptions(threshold=50000)
+torch.set_printoptions(threshold=50000, linewidth=100_000)
 
 
 OmegaConf.register_new_resolver("multiply", lambda x, y: x * y, replace=True)
