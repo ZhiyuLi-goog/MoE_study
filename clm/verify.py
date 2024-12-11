@@ -105,7 +105,7 @@ def main(config: DictConfig):
                 batch_size=1,
             ),
             torch_xla.device(),
-            input_sharding=xs.ShardingSpec(mesh, ("fsdp", None)),
+            input_sharding=xs.ShardingSpec(mesh, (None, None)),
         )
 
     for batch in eval_dataloader:
