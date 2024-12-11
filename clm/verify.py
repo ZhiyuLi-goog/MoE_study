@@ -16,6 +16,8 @@ from clm_datasets import get_datasets, process_datasets
 import torch_xla
 import torch_xla.distributed.parallel_loader as pl
 
+torch.set_printoptions(threshold=50000)
+
 
 OmegaConf.register_new_resolver("multiply", lambda x, y: x * y, replace=True)
 
@@ -67,9 +69,21 @@ def main(config: DictConfig):
     accelerator = Accelerator(log_with="tensorboard", project_dir=config.run_dir)
     setup_xla(config)
 
+    def print_tensor(key, tensor):
+        if len(tensor.shape) == 1:
+            return f"{key}: dtype={tensor.dtype}, mean={tensor.mean()}, min={tensor.min()}, max={tensor.max()}, std={tensor.std()}"
+        else:
+            return ( 
+                    f"{key} dtype={tensor.dtype}\n"
+                    f"{key} mean={tensor.mean(-1)}\n"
+                    f"{key} min={tensor.min(-1)[0]}\n"
+                    f"{key} max={tensor.max(-1)[0]}\n"
+                    f"{key} std={tensor.std(-1)}"
+                   )
+
     model, optimizer, scheduler = setup_model_optimizer(config)
     for k, v in model.state_dict().items():
-        logger.info(f"{k}: {v.dtype} {v.mean()=} {v.min()=} {v.max()=} {v.std()=}")
+        logger.info(f"{print_tensor(k, v)}")
 
     if tokenizer.vocab_size != model.config.vocab_size:
         logger.warning(
@@ -95,17 +109,11 @@ def main(config: DictConfig):
             labels = batch.pop("labels")
             outputs = model(**batch)
             logits = outputs.logits
-            logger.info(f"{logits.mean(-1)=}")
-            logger.info(f"{logits.min(-1)=}")
-            logger.info(f"{logits.max(-1)=}")
-            logger.info(f"{logits.std(-1)=}")
+            logger.info(f"{print_tensor('logits', logits)}")
 
             for i, layer_output in enumerate(outputs.hidden_states):
-                logger.info(f"layer_idx={i}")
-                logger.info(f"{layer_output.mean(-1)=}")
-                logger.info(f"{layer_output.min(-1)=}")
-                logger.info(f"{layer_output.max(-1)=}")
-                logger.info(f"{layer_output.std(-1)=}")
+                logger.info(f"{print_tensor(f'layer_output_{i}', layer_output)}")
+        xm.mark_step()
         break
 
 
