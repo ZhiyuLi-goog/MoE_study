@@ -71,10 +71,10 @@ def main(config: DictConfig):
 
     def print_tensor(key, tensor, dim=None):
         if dim is None:
-            return f"{key}: dtype={tensor.dtype}, mean={tensor.mean()}, min={tensor.min()}, max={tensor.max()}, std={tensor.std()}"
+            return f"{key}: dtype={tensor.dtype}, shape={tensor.shape}, mean={tensor.mean()}, min={tensor.min()}, max={tensor.max()}, std={tensor.std()}"
         else:
             return ( 
-                    f"{key} dtype={tensor.dtype}\n"
+                    f"{key} dtype={tensor.dtype}, shape={tensor.shape}\n"
                     f"{key} mean={tensor.mean(dim)}\n"
                     f"{key} min={tensor.min(dim)[0]}\n"
                     f"{key} max={tensor.max(dim)[0]}\n"
