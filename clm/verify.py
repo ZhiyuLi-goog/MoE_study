@@ -94,16 +94,16 @@ def main(config: DictConfig):
     logger.info(f"{datasets=}")
     train_dataset, eval_dataset = datasets["train"], datasets["validation"]
 
-    train_dataloader = pl.MpDeviceLoader(
+    eval_dataloader = pl.MpDeviceLoader(
             DataLoader(
-                train_dataset,
+                eval_dataset,
                 collate_fn=default_data_collator,
                 batch_size=1,
             ),
             torch_xla.device(),
         )
 
-    for batch in train_dataloader:
+    for batch in eval_dataloader:
         with torch.no_grad():
             logger.info(f"{batch=}")
             labels = batch.pop("labels")
