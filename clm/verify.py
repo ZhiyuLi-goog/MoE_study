@@ -10,6 +10,7 @@ from transformers import set_seed
 from file_utils import get_file
 from mlperf_logging_utils import MLPerfCallback
 import torch_xla.core.xla_model as xm
+from torch.utils.data import DataLoader
 
 from clm_datasets import get_datasets, process_datasets
 
@@ -77,12 +78,13 @@ def main(config: DictConfig):
     logger.info(f"{datasets=}")
     train_dataset, eval_dataset = datasets["train"], datasets["validation"]
 
-    batch = eval_dataset.with_format("torch", device=xm.xla_device())[0]
-    labels = batch.pop("labels")
-    outputs = model(**batch).logits
-    logits = outputs.logits
-    logger.info(f"{batch=}")
-    logger.info(f"{logits.mean(-1)=}")
+    for batch in DataLoader(eval_dataset, batch_size=1):
+        batch = batch.to(xm.xla_device())
+        labels = batch.pop("labels")
+        outputs = model(**batch).logits
+        logits = outputs.logits
+        logger.info(f"{batch=}")
+        logger.info(f"{logits.mean(-1)=}")
 
 
 if __name__ == "__main__":
