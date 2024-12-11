@@ -37,7 +37,7 @@ OmegaConf.register_new_resolver(
 )
 
 
-@hydra.main(config_path="config", config_name="config")
+@hydra.main(version_base=None, config_path="config", config_name="config")
 def main(config: DictConfig):
     logger = logging.get_logger(__name__)
 
