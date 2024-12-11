@@ -17,6 +17,8 @@ from clm_datasets import get_datasets, process_datasets
 import torch_xla
 import torch_xla.distributed.parallel_loader as pl
 
+from torch.nn import CrossEntropyLoss
+
 torch.set_printoptions(threshold=50000)
 
 
@@ -116,6 +118,23 @@ def main(config: DictConfig):
 
             for i, layer_output in enumerate(outputs.hidden_states):
                 logger.info(f"{print_tensor(f'layer_output_{i}', layer_output, dim=-1)}")
+
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            loss_fct = CrossEntropyLoss(ignore_index=config.pad_token_id)
+            # flatten
+            shift_logits = shift_logits.view(-1, logits.shape[-1])
+            shift_labels = shift_labels.view(-1)
+            # Enable model parallelism
+            shift_labels = shift_labels.to(shift_logits.device)
+            loss = loss_fct(shift_logits, shift_labels)
+            num_tokens = (labels != config.pad_token_id).sum()
+            loss_weight = (shift_labels != config.pad_token_id).sum()
+            metrics = {
+                "num_tokens": num_tokens,
+                "loss_weight": loss_weight,
+            }
+            logger.info(f"{loss=} {metrics=}")
         xm.mark_step()
         break
 
