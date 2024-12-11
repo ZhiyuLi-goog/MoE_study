@@ -77,14 +77,13 @@ def main(config: DictConfig):
     logger.info(f"{datasets=}")
     train_dataset, eval_dataset = datasets["train"], datasets["validation"]
 
-    for batch in eval_dataset:
-        batch = batch.to(xm.xla_device())
-        labels = batch.pop("labels")
-        outputs = model(**batch).logits
-        logits = outputs.logits
-        logger.info(f"{batch=}")
-        logger.info(f"{logits.mean(-1)=}")
-        break
+    batch = eval_dataset.with_format("torch")
+    batch = batch.to(xm.xla_device())
+    labels = batch.pop("labels")
+    outputs = model(**batch).logits
+    logits = outputs.logits
+    logger.info(f"{batch=}")
+    logger.info(f"{logits.mean(-1)=}")
 
 
 if __name__ == "__main__":
