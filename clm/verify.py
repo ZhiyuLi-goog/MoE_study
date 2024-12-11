@@ -84,6 +84,7 @@ def main(config: DictConfig):
         logits = outputs.logits
         logger.info(f"{batch=}")
         logger.info(f"{logits.mean(-1)=}")
+        break
 
 
 if __name__ == "__main__":
