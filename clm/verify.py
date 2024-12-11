@@ -10,6 +10,7 @@ from transformers import set_seed
 from file_utils import get_file
 from mlperf_logging_utils import MLPerfCallback
 import torch_xla.core.xla_model as xm
+import torch_xla.distributed.spmd as xs
 from torch.utils.data import DataLoader
 
 from clm_datasets import get_datasets, process_datasets
@@ -94,6 +95,7 @@ def main(config: DictConfig):
     logger.info(f"{datasets=}")
     train_dataset, eval_dataset = datasets["train"], datasets["validation"]
 
+    mesh = xs.get_global_mesh()
     eval_dataloader = pl.MpDeviceLoader(
             DataLoader(
                 eval_dataset,
@@ -101,6 +103,7 @@ def main(config: DictConfig):
                 batch_size=1,
             ),
             torch_xla.device(),
+            input_sharding=xs.ShardingSpec(mesh, ("fsdp", None)),
         )
 
     for batch in eval_dataloader:
