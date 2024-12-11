@@ -97,19 +97,17 @@ def main(config: DictConfig):
     logger.info(f"{datasets=}")
     train_dataset, eval_dataset = datasets["train"], datasets["validation"]
 
-    mesh = xs.get_global_mesh()
-    eval_dataloader = pl.MpDeviceLoader(
-            DataLoader(
+    eval_dataloader = DataLoader(
                 eval_dataset,
                 collate_fn=default_data_collator,
                 batch_size=1,
-            ),
-            torch_xla.device(),
-            input_sharding=xs.ShardingSpec(mesh, (None, None)),
-        )
+            )
 
     for batch in eval_dataloader:
         with torch.no_grad():
+            for key, value in batch.items():
+                if isinstance(value, torch.Tensor):
+                    batch[key] = value.to(xm.xla_device())
             logger.info(f"{batch=}")
             labels = batch.pop("labels")
             outputs = model(**batch)
