@@ -202,7 +202,7 @@ def setup_model_optimizer(config):
         model_config.capacity_factor = config.model.capacity_factor
         with torch.device("meta"):
             model = (
-                AutoModelForCausalLM.from_config(model_config, output_hidden_states=True)
+                AutoModelForCausalLM.from_config(model_config)
                 .to_empty(device=xm.xla_device())
                 .to(torch.bfloat16)
             )
