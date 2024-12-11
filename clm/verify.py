@@ -13,6 +13,7 @@ import torch_xla.core.xla_model as xm
 from torch.utils.data import DataLoader
 
 from clm_datasets import get_datasets, process_datasets
+import torch_xla
 import torch_xla.distributed.parallel_loader as pl
 
 
@@ -85,15 +86,27 @@ def main(config: DictConfig):
                 collate_fn=default_data_collator,
                 batch_size=1,
             ),
-            xm.device(),
+            torch_xla.device(),
         )
 
     for batch in train_dataloader:
-        labels = batch.pop("labels")
-        outputs = model(**batch).logits
-        logits = outputs.logits
-        logger.info(f"{batch=}")
-        logger.info(f"{logits.mean(-1)=}")
+        with torch.no_grad():
+            logger.info(f"{batch=}")
+            labels = batch.pop("labels")
+            outputs = model(**batch)
+            logits = outputs.logits
+            logger.info(f"{logits.mean(-1)=}")
+            logger.info(f"{logits.min(-1)=}")
+            logger.info(f"{logits.max(-1)=}")
+            logger.info(f"{logits.std(-1)=}")
+
+            for i, layer_output in enumerate(outputs.hidden_states):
+                logger.info(f"layer_idx={i}")
+                logger.info(f"{layer_output.mean(-1)=}")
+                logger.info(f"{layer_output.min(-1)=}")
+                logger.info(f"{layer_output.max(-1)=}")
+                logger.info(f"{layer_output.std(-1)=}")
+        break
 
 
 if __name__ == "__main__":

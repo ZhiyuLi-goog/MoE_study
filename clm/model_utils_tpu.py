@@ -194,16 +194,15 @@ def setup_model_optimizer(config):
 
     logger.info("loading model")
     if config.model.config_path:
-        model_config = AutoConfig.from_pretrained(config.model.config_path)
+        model_config = AutoConfig.from_pretrained(config.model.config_path, output_hidden_states=True, return_dict=True)
         model_config.static = True
         model_config.flash_attention = config.model.flash_attention
         model_config.gmm = False
         model_config.gmm_stack = False
         model_config.capacity_factor = config.model.capacity_factor
-        model_config.output_hidden_states=True
         with torch.device("meta"):
             model = (
-                AutoModelForCausalLM.from_config(model_config)
+                AutoModelForCausalLM.from_config(model_config, output_hidden_states=True)
                 .to_empty(device=xm.xla_device())
                 .to(torch.bfloat16)
             )
