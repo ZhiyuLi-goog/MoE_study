@@ -200,6 +200,7 @@ def setup_model_optimizer(config):
         model_config.gmm = False
         model_config.gmm_stack = False
         model_config.capacity_factor = config.model.capacity_factor
+        model_config.output_hidden_states=True
         with torch.device("meta"):
             model = (
                 AutoModelForCausalLM.from_config(model_config)
