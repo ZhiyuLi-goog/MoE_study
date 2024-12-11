@@ -69,16 +69,16 @@ def main(config: DictConfig):
     accelerator = Accelerator(log_with="tensorboard", project_dir=config.run_dir)
     setup_xla(config)
 
-    def print_tensor(key, tensor):
-        if len(tensor.shape) == 1:
+    def print_tensor(key, tensor, dim=None):
+        if dim is None:
             return f"{key}: dtype={tensor.dtype}, mean={tensor.mean()}, min={tensor.min()}, max={tensor.max()}, std={tensor.std()}"
         else:
             return ( 
                     f"{key} dtype={tensor.dtype}\n"
-                    f"{key} mean={tensor.mean(-1)}\n"
-                    f"{key} min={tensor.min(-1)[0]}\n"
-                    f"{key} max={tensor.max(-1)[0]}\n"
-                    f"{key} std={tensor.std(-1)}"
+                    f"{key} mean={tensor.mean(dim)}\n"
+                    f"{key} min={tensor.min(dim)[0]}\n"
+                    f"{key} max={tensor.max(dim)[0]}\n"
+                    f"{key} std={tensor.std(dim)}"
                    )
 
     model, optimizer, scheduler = setup_model_optimizer(config)
@@ -109,10 +109,10 @@ def main(config: DictConfig):
             labels = batch.pop("labels")
             outputs = model(**batch)
             logits = outputs.logits
-            logger.info(f"{print_tensor('logits', logits)}")
+            logger.info(f"{print_tensor('logits', logits, dim=-1)}")
 
             for i, layer_output in enumerate(outputs.hidden_states):
-                logger.info(f"{print_tensor(f'layer_output_{i}', layer_output)}")
+                logger.info(f"{print_tensor(f'layer_output_{i}', layer_output, dim=-1)}")
         xm.mark_step()
         break
 
