@@ -13,6 +13,7 @@ import torch_xla.core.xla_model as xm
 from torch.utils.data import DataLoader
 
 from clm_datasets import get_datasets, process_datasets
+import torch_xla.distributed.parallel_loader as pl
 
 
 OmegaConf.register_new_resolver("multiply", lambda x, y: x * y, replace=True)
@@ -78,8 +79,16 @@ def main(config: DictConfig):
     logger.info(f"{datasets=}")
     train_dataset, eval_dataset = datasets["train"], datasets["validation"]
 
-    for batch in DataLoader(eval_dataset, batch_size=1):
-        batch = batch.to(xm.xla_device())
+    train_dataloader = pl.MpDeviceLoader(
+            DataLoader(
+                train_dataset,
+                collate_fn=default_data_collator,
+                batch_size=1,
+            ),
+            xm.device(),
+        )
+
+    for batch in train_dataloader:
         labels = batch.pop("labels")
         outputs = model(**batch).logits
         logits = outputs.logits
