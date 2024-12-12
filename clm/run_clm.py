@@ -93,9 +93,11 @@ def main(config: DictConfig):
         )
     logger.info(f"{config.eval_frequency=}")
 
+
     tokenizer = AutoTokenizer.from_pretrained(
         config.model.name_or_path, add_eos_token=False, add_bos_token=False, use_fast=False,
     )
+    logger.info(f"{tokenizer=}")
 
     if not USE_CUDA:
         config_path = os.path.join(config.run_dir, "config.yaml")
