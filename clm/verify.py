@@ -148,15 +148,15 @@ def main(config: DictConfig):
         group_eval_loss_weight.append(eval_loss_weight)
         group_eval_num_tokens.append(eval_num_tokens)
 
-        total_eval_loss_sum = sum(group_eval_loss_sum)
-        total_eval_loss_weight = sum(group_eval_loss_weight)
-        total_eval_num_tokens = sum(group_eval_num_tokens)
-        group_eval_metrics = {
-            "eval/loss": (total_eval_loss_sum / total_eval_loss_weight),
-            "eval/num_tokens": total_eval_num_tokens,
-            "eval/total_weights": total_eval_loss_weight,
-        }
-        logger.info(f"{group_eval_metrics=}")
+    total_eval_loss_sum = sum(group_eval_loss_sum)
+    total_eval_loss_weight = sum(group_eval_loss_weight)
+    total_eval_num_tokens = sum(group_eval_num_tokens)
+    group_eval_metrics = {
+        "eval/loss": (total_eval_loss_sum / total_eval_loss_weight),
+        "eval/num_tokens": total_eval_num_tokens,
+        "eval/total_weights": total_eval_loss_weight,
+    }
+    logger.info(f"{group_eval_metrics=}")
 
 
 if __name__ == "__main__":
