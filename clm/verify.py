@@ -18,6 +18,7 @@ import torch_xla
 import torch_xla.distributed.parallel_loader as pl
 
 from torch.nn import CrossEntropyLoss
+from typing import List
 
 torch.set_printoptions(threshold=50000, linewidth=100_000)
 
@@ -27,6 +28,7 @@ OmegaConf.register_new_resolver("multiply", lambda x, y: x * y, replace=True)
 # from transformers import Trainer, logging
 from transformers import logging
 from trainer_utils_tpu import Trainer
+import torch_xla.core.xla_model as xm
 
 from model_utils_tpu import (
     setup_xla,
@@ -61,7 +63,7 @@ def main(config: DictConfig):
     logger.info(f"{config.eval_frequency=}")
 
     tokenizer = AutoTokenizer.from_pretrained(
-        config.model.name_or_path, add_eos_token=False, add_bos_token=False
+        config.model.name_or_path, add_eos_token=False, add_bos_token=False, use_false=False,
     )
 
     config_path = os.path.join(config.run_dir, "config.yaml")
@@ -72,21 +74,21 @@ def main(config: DictConfig):
     accelerator = Accelerator(log_with="tensorboard", project_dir=config.run_dir)
     setup_xla(config)
 
-    def print_tensor(key, tensor, dim=None):
+    def print_tensor(key, tensor, dim):
         if dim is None:
-            return f"{key}: dtype={tensor.dtype}, shape={tensor.shape}, mean={tensor.mean()}, min={tensor.min()}, max={tensor.max()}, std={tensor.std()}"
+            logger.info(f"{key}: dtype={tensor.dtype}, shape={tensor.shape}, mean={tensor.mean()}, min={tensor.min()}, max={tensor.max()}, std={tensor.std()}")
         else:
-            return ( 
-                    f"{key} dtype={tensor.dtype}, shape={tensor.shape}\n"
-                    f"{key} mean={tensor.mean(dim)}\n"
-                    f"{key} min={tensor.min(dim)[0]}\n"
-                    f"{key} max={tensor.max(dim)[0]}\n"
-                    f"{key} std={tensor.std(dim)}"
-                   )
+            logger.info( 
+                f"{key} dtype={tensor.dtype}, shape={tensor.shape}\n"
+                f"{key} mean={tensor.mean(dim)}\n"
+                f"{key} min={tensor.min(dim)[0]}\n"
+                f"{key} max={tensor.max(dim)[0]}\n"
+                f"{key} std={tensor.std(dim)}"
+                )
 
     model, optimizer, scheduler = setup_model_optimizer(config)
     for k, v in model.state_dict().items():
-        logger.info(f"{print_tensor(k, v)}")
+        xm.add_step_closure(print_tensor, args=(k, v, None))
 
     if tokenizer.vocab_size != model.config.vocab_size:
         logger.warning(
@@ -107,17 +109,21 @@ def main(config: DictConfig):
             torch_xla.device(),
             input_sharding=xs.ShardingSpec(mesh, ("fsdp", None)),
         )
-
-    for batch in eval_dataloader:
+    
+    group_eval_loss_sum: List = []
+    group_eval_loss_weight: List = []
+    group_eval_num_tokens: List = []
+    for i, batch in enumerate(eval_dataloader):
         with torch.no_grad():
-            logger.info(f"{batch=}")
-            labels = batch.pop("labels")[:1]
+            if i == 0:
+                logger.info(f"{batch['input_ids']=}")
+            labels = batch.pop("labels")
             outputs = model(**batch)
-            logits = outputs.logits[:1]
-            logger.info(f"{print_tensor('logits', logits, dim=-1)}")
-
-            for i, layer_output in enumerate(outputs.hidden_states):
-                logger.info(f"{print_tensor(f'layer_output_{i}', layer_output[:1], dim=-1)}")
+            logits = outputs.logits
+            if i == 0:
+                xm.add_step_closure(print_tensor, args=('logits', logits[:1], -1))
+                for i, layer_output in enumerate(outputs.hidden_states):
+                    xm.add_step_closure(print_tensor, args=(f'layer_output_{i}', layer_output[:1], -1))
 
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
@@ -134,9 +140,23 @@ def main(config: DictConfig):
                 "num_tokens": num_tokens,
                 "loss_weight": loss_weight,
             }
-            logger.info(f"{loss=} {metrics=}")
-        xm.mark_step()
-        break
+
+        eval_num_tokens = metrics["num_tokens"]
+        eval_loss_weight = metrics["loss_weight"]
+        eval_loss_sum = loss * eval_loss_weight
+        group_eval_loss_sum.append(eval_loss_sum)
+        group_eval_loss_weight.append(eval_loss_weight)
+        group_eval_num_tokens.append(eval_num_tokens)
+
+        total_eval_loss_sum = sum(group_eval_loss_sum)
+        total_eval_loss_weight = sum(group_eval_loss_weight)
+        total_eval_num_tokens = sum(group_eval_num_tokens)
+        group_eval_metrics = {
+            "eval/loss": (total_eval_loss_sum / total_eval_loss_weight),
+            "eval/num_tokens": total_eval_num_tokens,
+            "eval/total_weights": total_eval_loss_weight,
+        }
+        logger.info(f"{group_eval_metrics=}")
 
 
 if __name__ == "__main__":
