@@ -53,7 +53,7 @@ def prepare_model(model, config):
                 raise ValueError(
                     "Something went wrong, the output of the model shouldn't be `None`"
                 )
-            xs.mark_sharding(real_output, mesh, (None, None, None))
+            xs.mark_sharding(real_output, mesh, ("fsdp", None, None))
 
         auto_wrap_policy = None
         auto_wrapper_callable = None

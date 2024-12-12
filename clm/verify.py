@@ -102,22 +102,22 @@ def main(config: DictConfig):
             DataLoader(
                 eval_dataset,
                 collate_fn=default_data_collator,
-                batch_size=1,
+                batch_size=config.global_train_batch_size,
             ),
             torch_xla.device(),
-            input_sharding=xs.ShardingSpec(mesh, (None, None)),
+            input_sharding=xs.ShardingSpec(mesh, ("fsdp", None)),
         )
 
     for batch in eval_dataloader:
         with torch.no_grad():
             logger.info(f"{batch=}")
-            labels = batch.pop("labels")
+            labels = batch.pop("labels")[:1]
             outputs = model(**batch)
-            logits = outputs.logits
+            logits = outputs.logits[:1]
             logger.info(f"{print_tensor('logits', logits, dim=-1)}")
 
             for i, layer_output in enumerate(outputs.hidden_states):
-                logger.info(f"{print_tensor(f'layer_output_{i}', layer_output, dim=-1)}")
+                logger.info(f"{print_tensor(f'layer_output_{i}', layer_output[:1], dim=-1)}")
 
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
