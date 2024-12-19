@@ -5,11 +5,7 @@ from megatron.core.optimizer import OptimizerConfig
 from nemo import lightning as nl
 from nemo.collections import llm
 from nemo.collections.common.tokenizers import AutoTokenizer
-from nemo.collections.nlp.data.language_modeling.megatron.gpt_sft_chat_dataset import (
-    get_prompt_template_example,
-)
 from nemo.utils import logging
-from omegaconf.omegaconf import OmegaConf, open_dict
 from transformers import TrainingArguments
 
 
@@ -61,7 +57,10 @@ def setup_model_and_trainer(
     optimizer_name: str,
     tokenizer_name_or_path: str,
     scheduler,
-    trainer_args: TrainingArguments,
+    max_grad_norm: float,
+    eval_frequency: int,
+    log_frequency: int,
+    max_steps: int,
     *,
     logger,
     callbacks: list,
@@ -69,14 +68,10 @@ def setup_model_and_trainer(
     logging.info("loading model")
 
     if "mixtral-8x7b" in model_name_or_path.lower():
-        mixtral_config = llm.MixtralConfig8x7B(
-            max_position_embeddings=input_sequence_length,
-            seq_length=input_sequence_length,
-        )
+        mixtral_config = llm.MixtralConfig8x7B()
     elif "mixtral-8x22b" in model_name_or_path.lower():
         mixtral_config = llm.MixtralConfig8x22B(
-            max_position_embeddings=input_sequence_length,
-            seq_length=input_sequence_length,
+            moe_aux_loss_coeff=0.001,
         )
     else:
         raise ValueError(f"Unknown model specified: {model_name_or_path}")
@@ -110,36 +105,45 @@ def setup_model_and_trainer(
         lr=learning_rate,
         bf16=True,
         params_dtype=torch.bfloat16,
+        clip_grad=max_grad_norm,
     )
 
     if scheduler.name == "CosineAnnealing":
         opt_sched = nl.lr_scheduler.CosineAnnealingScheduler(
+            warmup_steps=scheduler.warmup_steps
+            if "warmup_steps" in scheduler
+            else None,
+            warmup_ratio=scheduler.warmup_ratio
+            if "warmup_steps" not in scheduler
+            else None,
             max_steps=scheduler.max_steps,
-            warmup_steps=scheduler.warmup_steps,
             min_lr=scheduler.min_lr,
         )
     elif scheduler.name == "WarmupHoldPolicy":
         opt_sched = nl.lr_scheduler.WarmupHoldPolicyScheduler(
-            warmup_steps=scheduler.warmup_steps,
+            warmup_steps=scheduler.warmup_steps
+            if "warmup_steps" in scheduler
+            else None,
+            warmup_ratio=scheduler.warmup_ratio
+            if "warmup_steps" not in scheduler
+            else None,
             hold_steps=scheduler.hold_steps,
             max_steps=scheduler.max_steps,
         )
 
     opt = nl.MegatronOptimizerModule(config=opt_config, lr_scheduler=opt_sched)
-
     trainer = nl.Trainer(
         devices=8,
         num_nodes=nodes,
-        max_steps=trainer_args.max_steps,
+        max_steps=max_steps,
         accelerator="gpu",
         strategy=strategy,
         plugins=precision,
         callbacks=callbacks,
         logger=logger,
         enable_progress_bar=False,
-        val_check_interval=trainer_args.eval_steps,
-        log_every_n_steps=trainer_args.logging_steps,
-        gradient_clip_val=trainer_args.max_grad_norm,
+        val_check_interval=eval_frequency,
+        log_every_n_steps=log_frequency,
     )
 
     logger.set_trainer(trainer)
@@ -151,39 +155,3 @@ def setup_model_and_trainer(
         opt,
         resume,
     )
-
-
-def flatten(dictionary, parent_key="", separator="_"):
-    items = []
-    for key, value in dictionary.items():
-        new_key = parent_key + separator + key if parent_key else key
-        if isinstance(value, dict):
-            items.extend(flatten(value, new_key, separator=separator).items())
-        else:
-            items.append((new_key, value))
-    return dict(items)
-
-
-class Tracker:
-    def __init__(self, config, logger):
-        exp_config = {}
-        for k, v in flatten(OmegaConf.to_container(config)).items():
-            if isinstance(v, (str, int, float, str, bool, torch.Tensor)):
-                exp_config[k] = v
-            else:
-                exp_config[k] = str(v)
-
-        self.logger = logger
-        self.config = config
-
-    def record_train_step(self, metrics, num_examples):
-        if torch.cuda.current_device() == 0:
-            self.logger.log_metrics(
-                metrics,
-                step=int(num_examples / self.config.global_train_batch_size),
-                prefix="train/",
-            )
-
-    def record_eval_step(self, metrics, num_examples):
-        if torch.cuda.current_device() == 0:
-            self.logger.log_metrics(metrics, step=int(num_examples), prefix="val/")

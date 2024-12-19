@@ -1,8 +1,9 @@
 import os
 
 import hydra
+import numpy as np
 import torch
-from clm_datasets import get_datasets, process_datasets
+from clm_datasets import get_dataset_cuda, get_datasets, process_datasets
 from file_utils import get_file
 from mlperf_logging_utils import (
     ClmLogger,
@@ -10,20 +11,15 @@ from mlperf_logging_utils import (
     MLPerfCallback,
     MLPerfLightningCallback,
 )
-from omegaconf import DictConfig, OmegaConf, open_dict
-from transformers import (
-    AutoTokenizer,
-    TrainingArguments,
-    default_data_collator,
-    logging,
-    set_seed,
-)
+from omegaconf import DictConfig, OmegaConf
+from transformers import AutoTokenizer, default_data_collator, logging, set_seed
 
 USE_CUDA = torch.cuda.is_available()  # os.environ.get('USE_CUDA', False)
 
 OmegaConf.register_new_resolver("multiply", lambda x, y: x * y, replace=True)
 
 if not USE_CUDA:
+    from accelerate import Accelerator
     from model_utils_tpu import (
         TensorBoardCallback,
         get_global_batch_size,
@@ -31,7 +27,6 @@ if not USE_CUDA:
         setup_xla,
     )
     from trainer_utils_tpu import Trainer
-    from transformers import logging
 
     OmegaConf.register_new_resolver(
         "get_global_batch_size",
@@ -61,10 +56,7 @@ else:
 
 @hydra.main(version_base=None, config_path="config", config_name="config")
 def main(config: DictConfig):
-    if USE_CUDA:
-        logger = logging.getLogger(__name__)
-    else:
-        logger = logging.get_logger(__name__)
+    logger = logging.get_logger(__name__)
 
     OmegaConf.resolve(config)
     set_seed(config.seed)
@@ -83,7 +75,7 @@ def main(config: DictConfig):
         config.model.name_or_path, add_eos_token=False, add_bos_token=False
     )
 
-    clmlogger = ClmLogger(target_eval_loss=0)
+    clmlogger = ClmLogger(config, filename="output.txt")
     # tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
     tokenizer = AutoTokenizer.from_pretrained("mistralai/Mixtral-8x7B-v0.1")
 
@@ -101,6 +93,32 @@ def main(config: DictConfig):
             logger.warning(
                 f"Found mismatch between {tokenizer.vocab_size=} and {model.config.vocab_size}"
             )
+        raw_datasets = get_datasets(config)
+        datasets = process_datasets(raw_datasets, tokenizer, config)
+        train_dataset, eval_dataset = datasets["train"], datasets["validation"]
+
+        def preprocess_logits_for_metrics(logits, labels):
+            if isinstance(logits, tuple):
+                # Depending on the model and config, logits may contain extra tensors,
+                # like past_key_values, but logits always come first
+                logits = logits
+            return logits
+
+        # Initialize our Trainer
+        trainer = Trainer(
+            model=model,
+            config=config,
+            tokenizer=tokenizer,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            # Data collator will default to DataCollatorWithPadding, so we change it.
+            data_collator=default_data_collator,
+            callbacks=[MLPerfCallback(config), TensorBoardCallback(config)],
+        )
+        trainer.train()
+
     else:
         if "adam" in config.optimizer.lower():
             optimizer_name = "adam"
@@ -119,10 +137,6 @@ def main(config: DictConfig):
             * data_parallel_size
         )
 
-        print(
-            f"DEBUG BS: {torch.distributed.get_world_size()}, {data_parallel_size}, {config.global_train_batch_size}"
-        )
-
         config.global_eval_batch_size = config.global_train_batch_size
         number_of_nodes = (
             torch.distributed.get_world_size() // torch.cuda.device_count()
@@ -133,19 +147,20 @@ def main(config: DictConfig):
             number_of_nodes,
             config.global_train_batch_size,
             config.lr,
-            config.model.max_sequence_length,
+            config.max_length,
         )
 
         callbacks = [
             MLPerfLightningCallback(
                 clmlogger,
                 config.global_train_batch_size,
-                config.model.max_sequence_length,
+                config.max_length,
             )
         ]
 
         if (
-            config.model.capacity_factor is not None
+            "capacity_factor" in config.model
+            and config.model.capacity_factor is not None
             and config.model.capacity_factor > 0
         ):
             from nemo.lightning.pytorch.callbacks.moe_token_drop import (
@@ -154,7 +169,7 @@ def main(config: DictConfig):
 
             callbacks.append(
                 MegatronTokenDropCallback(
-                    moe_expert_capacity_factor=config.model.expert_capacity
+                    moe_expert_capacity_factor=config.model.capacity_factor
                 )
             )
 
@@ -164,7 +179,7 @@ def main(config: DictConfig):
 
         model, trainer, optimizer, resume = setup_model_and_trainer(
             model_name_or_path=config.model.name_or_path,
-            input_sequence_length=config.model.max_sequence_length,
+            input_sequence_length=config.max_length,
             global_batch_size=config.global_train_batch_size,
             nodes=number_of_nodes,
             tp_size=config.tensor_parallelism,
@@ -175,30 +190,17 @@ def main(config: DictConfig):
             optimizer_name=optimizer_name,
             tokenizer_name_or_path=config.model.name_or_path,
             scheduler=config.sched,
-            trainer_args=trainer_args,
+            max_grad_norm=config.max_grad_norm,
+            eval_frequency=config.eval_frequency,
+            log_frequency=1,
+            max_steps=config.max_steps,
             logger=metrics_logger,
             callbacks=callbacks,
         )
-    raw_datasets = get_datasets(config)
-    datasets = process_datasets(raw_datasets, tokenizer, config)
-    train_dataset, eval_dataset = datasets["train"], datasets["validation"]
-
-    if USE_CUDA:
-        from clm_datasets import DatasetModule
-
-        dataset = DatasetModule(
-            train_dataset,
-            eval_dataset,
-            tokenizer,
-            micro_batch_size=config.per_device_train_batch_size,
-            global_batch_size=config.global_train_batch_size,
-            seq_len=config.model.max_sequence_length,
-        )
-
         ckpt = nl.ModelCheckpoint(
-            save_last=True,
-            save_top_k=True,
-            every_n_train_steps=100000,
+            save_last=False,
+            save_top_k=False,
+            every_n_train_steps=0,
             always_save_context=False,
             save_context_on_train_end=False,
         )
@@ -211,6 +213,8 @@ def main(config: DictConfig):
             log_dir="/results",
         )
 
+        dataset = get_dataset_cuda(config)
+
         llm.train(
             model=model,
             data=dataset,
@@ -221,30 +225,6 @@ def main(config: DictConfig):
             # log=None,
             resume=resume,
         )
-    else:
-
-        def preprocess_logits_for_metrics(logits, labels):
-            if isinstance(logits, tuple):
-                # Depending on the model and config, logits may contain extra tensors,
-                # like past_key_values, but logits always come first
-                logits = logits
-            return logits
-
-        # Initialize our Trainer
-        trainer = Trainer(
-            model=model,
-            args=trainer_args,
-            tokenizer=tokenizer,
-            train_dataset=train_dataset,
-            eval_dataset=eval_dataset,
-            optimizers=[optimizer, scheduler],
-            # Data collator will default to DataCollatorWithPadding, so we change it.
-            compute_metrics=None,
-            data_collator=default_data_collator,
-            # callbacks=[MLPerfCallback(clmlogger, len(train_dataset), len(eval_dataset))],
-            callbacks=[MLPerfCallback(clmlogger, 100, 10)],
-        )
-        trainer.train()
 
 
 if __name__ == "__main__":

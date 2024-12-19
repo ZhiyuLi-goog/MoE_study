@@ -5,7 +5,6 @@ import pytorch_lightning as pl
 import torch
 import transformers
 from datasets import Features, Value, concatenate_datasets, load_dataset
-from nemo.lightning.pytorch.plugins import MegatronDataSampler
 from torch.utils.data import DataLoader, default_collate
 from transformers import logging
 from transformers.testing_utils import CaptureLogger
@@ -65,30 +64,57 @@ def get_datasets(config):
     return raw_datasets
 
 
-def generate_attention_mask(examples):
-    default_seq_length = 32768
-    default_attention_mask = torch.tril(
-        torch.ones((default_seq_length, default_seq_length), device="cpu")
+def get_dataset_cuda(config):
+    import os
+
+    from nemo.collections import llm
+    from nemo.collections.common.tokenizers.sentencepiece_tokenizer import (
+        SentencePieceTokenizer,
     )
 
-    attention_masks = []
-    for sequence in examples["input_ids"]:
-        # sequence = example["input_ids"]
-        if isinstance(sequence, torch.Tensor):
-            sequence_length = sequence.shape[0]
-        else:
-            sequence_length = len(sequence)
+    class PreTrainingDataModule(llm.PreTrainingDataModule):
+        @property
+        def gpt_dataset_config(self):
+            config = super().gpt_dataset_config
+            config.drop_last_partial_validation_sequence = False
+            return config
 
-        if sequence_length == default_seq_length:
-            attention_mask = default_attention_mask
-        else:
-            attention_mask = torch.tril(
-                torch.ones((sequence_length, sequence_length), device="cpu")
-            )
+    INDEX_MAPPING_DIR = "/cache/dataset"
+    os.makedirs(INDEX_MAPPING_DIR, exist_ok=True)
+    tokenizer = SentencePieceTokenizer(
+        model_path=os.path.join(
+            config.checkpoint_manager_path,
+            "context",
+            "nemo_tokenizer",
+            "tokenizer.model",
+        )
+    )
 
-        attention_masks.append(attention_mask)
-    examples["attention_mask"] = attention_masks
-    return examples
+    dataset_train = [
+        os.path.join(config.dataset.train_dataset_path, "c4-train.en_6_text_document"),
+        os.path.join(config.dataset.train_dataset_path, "c4-train.en_7_text_document"),
+    ]
+
+    dataset_valid = [
+        os.path.join(
+            config.dataset.eval_dataset_path, "c4-validation-small.en_text_document"
+        )
+    ]
+
+    return PreTrainingDataModule(
+        paths={
+            "train": dataset_train,
+            "validation": dataset_valid,
+            "test": dataset_valid,
+        },
+        seq_length=config.max_length,
+        global_batch_size=config.global_train_batch_size,
+        micro_batch_size=config.per_device_train_batch_size,
+        tokenizer=tokenizer,
+        index_mapping_dir=INDEX_MAPPING_DIR,
+        num_workers=2,
+        persistent_workers=True,
+    )
 
 
 def process_datasets(raw_datasets, tokenizer, config, use_cuda: bool = True):
@@ -163,18 +189,7 @@ def process_datasets(raw_datasets, tokenizer, config, use_cuda: bool = True):
             for k, t in concatenated_examples.items()
         }
 
-        result = {
-            k: [torch.tensor(t) for t in v]
-            for k, v in result.items()
-            if k != "attention_mask"
-        }
-
         result["labels"] = result["input_ids"].copy()
-        result["tokens"] = result["input_ids"]
-        result["loss_mask"] = [torch.ones_like(x) for x in result["input_ids"]]
-        result["position_ids"] = [
-            torch.arange(ids.shape[0]) for ids in result["input_ids"]
-        ]
 
         return result
 
@@ -212,70 +227,4 @@ def process_datasets(raw_datasets, tokenizer, config, use_cuda: bool = True):
             [lm_datasets["validation"], pad_validation_dataset]
         )
 
-    # if use_cuda:
-    #    lm_datasets = lm_datasets.map(
-    #        generate_attention_mask,
-    #        batched=True,
-    #        # num_proc=config.dataset.num_proc,
-    #        load_from_cache_file=config.dataset.load_from_cache_file,
-    #        desc=f"Adding attention mask",
-    #    )
-
     return lm_datasets.with_format("torch")
-
-
-class DatasetModule(pl.LightningDataModule):
-    def __init__(
-        self,
-        train_dataset,
-        eval_dataset,
-        tokenizer,
-        micro_batch_size: int,
-        global_batch_size: int,
-        seq_len: int,
-    ):
-        super().__init__()
-
-        self.train_dataset = train_dataset
-        self.eval_dataset = eval_dataset
-        self.tokenizer = tokenizer
-        self.seq_len = seq_len
-        self.micro_batch_size = micro_batch_size
-        self.global_batch_size = global_batch_size
-
-        self.data_sampler = MegatronDataSampler(
-            seq_len=self.seq_len,
-            micro_batch_size=self.micro_batch_size,
-            global_batch_size=self.global_batch_size,
-            rampup_batch_size=None,
-        )
-
-    def train_dataloader(self):
-        return DataLoader(
-            self.train_dataset,
-            batch_size=self.micro_batch_size,
-            collate_fn=DatasetModule.collate_fn,
-        )
-
-    def val_dataloader(self):
-        return DataLoader(
-            self.eval_dataset,
-            batch_size=self.micro_batch_size,
-            collate_fn=DatasetModule.collate_fn,
-        )
-
-    def test_dataloader(self):
-        return DataLoader(
-            self.eval_dataset,
-            batch_size=self.micro_batch_size,
-            collate_fn=DatasetModule.collate_fn,
-        )
-
-    @staticmethod
-    def collate_fn(batch):
-        return default_collate(batch)
-
-        result = {}
-        for key in batch[0].keys():
-            result[key] = torch.stack([item[key] for item in batch])
-        return result

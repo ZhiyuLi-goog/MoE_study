@@ -163,7 +163,7 @@ class MLPerfCallback(TrainerCallback):
         Event called at the end of a training step.
         """
         if state.global_step % (state.eval_steps) == 0 and state.global_step > 0:
-           self.mllogger.event(
+            self.mllogger.event(
                 "train_loss",
                 value=state.log_history[-1]["loss"] if state.log_history else -1,
                 metadata={
