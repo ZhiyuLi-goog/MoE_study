@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM nvcr.io/nvidia/nemo:dev
+FROM nvcr.io/nvidia/nemo:24.09
 WORKDIR /app
 
 RUN pip install git+https://github.com/NVIDIA/dllogger#egg=dllogger
@@ -20,3 +20,4 @@ RUN pip install datasets==2.20.0 hydra-core sentencepiece
 RUN pip install "git+https://github.com/mlperf/logging.git"
 
 ADD . /app
+RUN patch --directory=/opt/megatron-lm -p1 < docker/gpu/megatron_core.patch
