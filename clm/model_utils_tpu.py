@@ -160,9 +160,9 @@ def setup_xla(config):
         import jax
 
         assert config.model.dtype == "float32", "model dtype need to be float32"
-        torch_xla._XLAC._xla_set_use_full_mat_mul_precision(
-            use_full_mat_mul_precision=True
-        )
+        precision = "highest"
+        torch.set_float32_matmul_precision(precision)
+        torch_xla._XLAC._xla_set_mat_mul_precision(precision)
         jax.config.update("jax_default_matmul_precision", "highest")
 
     num_devices = xr.global_runtime_device_count()
