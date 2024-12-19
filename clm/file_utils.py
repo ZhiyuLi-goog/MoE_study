@@ -1,5 +1,11 @@
 import os
-from google.cloud import storage
+
+try:
+    from google.cloud import storage
+
+    HAS_IMPORT_GOOGLE_CLOUD_SDK_EXCEPTION = None
+except ImportError as e:
+    HAS_IMPORT_GOOGLE_CLOUD_SDK_EXCEPTION = e
 
 
 def parse_gcs_bucket_and_blob_name(gcs_path):
@@ -20,6 +26,8 @@ def get_blob(gcs_path):
 
 def get_file(path, mode):
     if path.startswith("gs://"):
+        if HAS_IMPORT_GOOGLE_CLOUD_SDK_EXCEPTION:
+            raise HAS_IMPORT_GOOGLE_CLOUD_SDK_EXCEPTION
         return get_blob(path).open(mode)
     else:
         file_dir = os.path.dirname(path)
