@@ -1,9 +1,13 @@
 import os
-from datasets import load_dataset, Features, Value, concatenate_datasets
-from transformers.testing_utils import CaptureLogger
-import transformers
 from itertools import chain
+
+import pytorch_lightning as pl
+import torch
+import transformers
+from datasets import Features, Value, concatenate_datasets, load_dataset
+from torch.utils.data import DataLoader, default_collate
 from transformers import logging
+from transformers.testing_utils import CaptureLogger
 
 logger = logging.get_logger(__name__)
 
@@ -60,7 +64,60 @@ def get_datasets(config):
     return raw_datasets
 
 
-def process_datasets(raw_datasets, tokenizer, config):
+def get_dataset_cuda(config):
+    import os
+
+    from nemo.collections import llm
+    from nemo.collections.common.tokenizers.sentencepiece_tokenizer import (
+        SentencePieceTokenizer,
+    )
+
+    class PreTrainingDataModule(llm.PreTrainingDataModule):
+        @property
+        def gpt_dataset_config(self):
+            config = super().gpt_dataset_config
+            config.drop_last_partial_validation_sequence = False
+            return config
+
+    INDEX_MAPPING_DIR = "/cache/dataset"
+    os.makedirs(INDEX_MAPPING_DIR, exist_ok=True)
+    tokenizer = SentencePieceTokenizer(
+        model_path=os.path.join(
+            config.checkpoint_manager_path,
+            "context",
+            "nemo_tokenizer",
+            "tokenizer.model",
+        )
+    )
+
+    dataset_train = [
+        os.path.join(config.dataset.train_dataset_path, "c4-train.en_6_text_document"),
+        os.path.join(config.dataset.train_dataset_path, "c4-train.en_7_text_document"),
+    ]
+
+    dataset_valid = [
+        os.path.join(
+            config.dataset.eval_dataset_path, "c4-validation-small.en_text_document"
+        )
+    ]
+
+    return PreTrainingDataModule(
+        paths={
+            "train": dataset_train,
+            "validation": dataset_valid,
+            "test": dataset_valid,
+        },
+        seq_length=config.max_length,
+        global_batch_size=config.global_train_batch_size,
+        micro_batch_size=config.per_device_train_batch_size,
+        tokenizer=tokenizer,
+        index_mapping_dir=INDEX_MAPPING_DIR,
+        num_workers=2,
+        persistent_workers=True,
+    )
+
+
+def process_datasets(raw_datasets, tokenizer, config, use_cuda: bool = True):
     # First we tokenize all the texts.
     column_names = list(raw_datasets["train"].features)
     text_column_name = "text" if "text" in column_names else column_names[0]
@@ -111,7 +168,6 @@ def process_datasets(raw_datasets, tokenizer, config):
         key: dataset.remove_columns(column_names)
         for key, dataset in tokenized_datasets.items()
     }
-
     block_size = config.max_length
 
     # Main data processing function that will concatenate all texts from our dataset and generate chunks of block_size.
@@ -132,7 +188,9 @@ def process_datasets(raw_datasets, tokenizer, config):
             k: [t[i : i + block_size] for i in range(0, total_length, block_size)]
             for k, t in concatenated_examples.items()
         }
+
         result["labels"] = result["input_ids"].copy()
+
         return result
 
     lm_datasets = process_datasets_function(
@@ -169,4 +227,4 @@ def process_datasets(raw_datasets, tokenizer, config):
             [lm_datasets["validation"], pad_validation_dataset]
         )
 
-    return lm_datasets
+    return lm_datasets.with_format("torch")

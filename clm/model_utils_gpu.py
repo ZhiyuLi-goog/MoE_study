@@ -1,18 +1,12 @@
 import os
-from omegaconf.omegaconf import OmegaConf, open_dict
+
 import torch
-
+from megatron.core.optimizer import OptimizerConfig
+from nemo import lightning as nl
+from nemo.collections import llm
+from nemo.collections.common.tokenizers import AutoTokenizer
 from nemo.utils import logging
-from nemo.collections.nlp.data.language_modeling.megatron.gpt_sft_chat_dataset import (
-    get_prompt_template_example,
-)
-
-from nemo_aligner.utils.train_script_utils import (
-    init_distributed,
-    init_peft,
-)
-from nemo_aligner.utils.utils import load_from_nemo
-from nemo_aligner.models.nlp.gpt.gpt_sft_model import GPTSFTModel
+from transformers import TrainingArguments
 
 
 def setup_distributed(config):
@@ -50,134 +44,114 @@ def setup_distributed(config):
     return local_rank, rank, world_size
 
 
-def setup_model_optimizer(config, trainer):
+def setup_model_and_trainer(
+    model_name_or_path: str,
+    input_sequence_length: int,
+    global_batch_size: int,
+    nodes: int,
+    tp_size: int,
+    pp_size: int,
+    vpp_size: int,
+    cp_size: int,
+    learning_rate: float,
+    optimizer_name: str,
+    tokenizer_name_or_path: str,
+    scheduler,
+    max_grad_norm: float,
+    eval_frequency: int,
+    log_frequency: int,
+    max_steps: int,
+    *,
+    logger,
+    callbacks: list,
+):
     logging.info("loading model")
-    model, updated_cfg = load_from_nemo(
-        GPTSFTModel,
-        config,
-        trainer,
-        strict=True,
-        modify_config_fn=_modify_config,
-        restore_path=config.model.restore_from_path,
-        return_updated_cfg=True,
+
+    if "mixtral-8x7b" in model_name_or_path.lower():
+        mixtral_config = llm.MixtralConfig8x7B()
+    elif "mixtral-8x22b" in model_name_or_path.lower():
+        mixtral_config = llm.MixtralConfig8x22B(
+            moe_aux_loss_coeff=0.001,
+        )
+    else:
+        raise ValueError(f"Unknown model specified: {model_name_or_path}")
+
+    resume = nl.AutoResume(resume_from_path="/app/checkpoints/")
+    tokenizer = AutoTokenizer(pretrained_model_name=tokenizer_name_or_path)
+    model = llm.MixtralModel(mixtral_config, tokenizer=tokenizer)
+
+    ## initialize the strategy
+    strategy = nl.MegatronStrategy(
+        tensor_model_parallel_size=tp_size,
+        pipeline_model_parallel_size=pp_size,
+        virtual_pipeline_model_parallel_size=vpp_size,
+        sequence_parallel=True,
+        context_parallel_size=cp_size,
+        pipeline_dtype=torch.bfloat16,
+        ckpt_load_optimizer=False,
     )
-    init_peft(model, updated_cfg)
 
-    init_distributed(trainer, model, config.model.get("transformer_engine", False))
-    return model, None, None
+    precision = nl.MegatronMixedPrecision(
+        precision="bf16-mixed",
+        params_dtype=torch.bfloat16,
+        pipeline_dtype=torch.bfloat16,
+        autocast_enabled=False,
+        grad_reduce_in_fp32=True,
+    )
 
+    ## setup the optimizer
+    opt_config = OptimizerConfig(
+        optimizer=optimizer_name,
+        lr=learning_rate,
+        bf16=True,
+        params_dtype=torch.bfloat16,
+        clip_grad=max_grad_norm,
+    )
 
-def flatten(dictionary, parent_key="", separator="_"):
-    items = []
-    for key, value in dictionary.items():
-        new_key = parent_key + separator + key if parent_key else key
-        if isinstance(value, dict):
-            items.extend(flatten(value, new_key, separator=separator).items())
-        else:
-            items.append((new_key, value))
-    return dict(items)
-
-
-def _modify_config(gpt_cfg, cfg, add_cfg_to_tree=False):
-    """
-    This function modifies the original gpt pre-training config (gpt_cfg) with attributes from the finetuning config (cfg).
-    The `add_cfg_to_tree` arg adds `cfg` to the top of the yaml tree which is needed for all `hparams.yaml` files when passed as an arg to `load_from_checkpoint()`.
-    """
-    OmegaConf.set_struct(gpt_cfg, True)
-    OmegaConf.resolve(cfg)
-    with open_dict(gpt_cfg):
-        gpt_cfg.megatron_amp_O2 = cfg.model.get("megatron_amp_O2", False)
-        gpt_cfg.micro_batch_size = cfg.model.data.train_ds.micro_batch_size
-        gpt_cfg.global_batch_size = cfg.model.data.train_ds.global_batch_size
-        gpt_cfg.sequence_parallel = cfg.model.get("sequence_parallel", False)
-        gpt_cfg.activations_checkpoint_granularity = cfg.model.get(
-            "activations_checkpoint_granularity", None
+    if scheduler.name == "CosineAnnealing":
+        opt_sched = nl.lr_scheduler.CosineAnnealingScheduler(
+            warmup_steps=scheduler.warmup_steps
+            if "warmup_steps" in scheduler
+            else None,
+            warmup_ratio=scheduler.warmup_ratio
+            if "warmup_steps" not in scheduler
+            else None,
+            max_steps=scheduler.max_steps,
+            min_lr=scheduler.min_lr,
         )
-        gpt_cfg.activations_checkpoint_num_layers = cfg.model.get(
-            "activations_checkpoint_num_layers", None
-        )
-        gpt_cfg.activations_checkpoint_method = cfg.model.get(
-            "activations_checkpoint_method", None
-        )
-        gpt_cfg.activations_checkpoint_layers_per_pipeline = cfg.model.get(
-            "activations_checkpoint_layers_per_pipeline", None
-        )
-        gpt_cfg.peft = cfg.model.peft
-        gpt_cfg.data = cfg.model.data
-        gpt_cfg.optim = cfg.model.optim
-        gpt_cfg.precision = cfg.trainer.precision
-        gpt_cfg.answer_only_loss = cfg.model.answer_only_loss
-        gpt_cfg.restore_from_path = cfg.model.restore_from_path
-        gpt_cfg.resume_from_checkpoint = cfg.model.resume_from_checkpoint
-        gpt_cfg.save_nemo_on_validation_end = cfg.model.save_nemo_on_validation_end
-        gpt_cfg.gradient_as_bucket_view = cfg.model.gradient_as_bucket_view
-        gpt_cfg.hidden_dropout = cfg.model.get("hidden_dropout", 0.0)
-        gpt_cfg.attention_dropout = cfg.model.get("attention_dropout", 0.0)
-        gpt_cfg.ffn_dropout = cfg.model.ffn_dropout
-        gpt_cfg.use_flash_attention = cfg.model.get("use_flash_attention", False)
-        # if TP/PP size is -1, use default TP/PP size as original model
-        if cfg.model.get("tensor_model_parallel_size", 1) > 0:
-            gpt_cfg.tensor_model_parallel_size = cfg.model.get(
-                "tensor_model_parallel_size", 1
-            )
-        if cfg.model.get("pipeline_model_parallel_size", 1) > 0:
-            gpt_cfg.pipeline_model_parallel_size = cfg.model.get(
-                "pipeline_model_parallel_size", 1
-            )
-        gpt_cfg.pipeline_model_parallel_split_rank = cfg.model.get(
-            "pipeline_model_parallel_split_rank", 0
+    elif scheduler.name == "WarmupHoldPolicy":
+        opt_sched = nl.lr_scheduler.WarmupHoldPolicyScheduler(
+            warmup_steps=scheduler.warmup_steps
+            if "warmup_steps" in scheduler
+            else None,
+            warmup_ratio=scheduler.warmup_ratio
+            if "warmup_steps" not in scheduler
+            else None,
+            hold_steps=scheduler.hold_steps,
+            max_steps=scheduler.max_steps,
         )
 
-        if cfg.model.data.get("chat", False):
-            # chat model, overwrite the prompt template
-            prompt_template = get_prompt_template_example(
-                cfg.model.data.chat_prompt_tokens
-            )
-            gpt_cfg.data.train_ds.prompt_template = prompt_template
-            gpt_cfg.data.validation_ds.prompt_template = prompt_template
+    opt = nl.MegatronOptimizerModule(config=opt_config, lr_scheduler=opt_sched)
+    trainer = nl.Trainer(
+        devices=8,
+        num_nodes=nodes,
+        max_steps=max_steps,
+        accelerator="gpu",
+        strategy=strategy,
+        plugins=precision,
+        callbacks=callbacks,
+        logger=logger,
+        enable_progress_bar=False,
+        val_check_interval=eval_frequency,
+        log_every_n_steps=log_frequency,
+    )
 
-        sft_cls = GPTSFTModel
-        gpt_cfg.target = f"{sft_cls.__module__}.{sft_cls.__name__}"
+    logger.set_trainer(trainer)
+    logger.log_hyperparams(None)
 
-        if cfg.model.get("use_flash_attention", None) is not None:
-            gpt_cfg.use_flash_attention = cfg.model.use_flash_attention
-
-        if cfg.model.get("seq_len_interpolation_factor", None) is not None:
-            gpt_cfg.seq_len_interpolation_factor = (
-                cfg.model.seq_len_interpolation_factor
-            )
-
-        gpt_cfg.inference = cfg.model.get("inference", {})
-
-        # This is needed when modifying a hparam file directly to load `.ckpt` files.
-        # This is not needed to modify the cfg in `.nemo` files.
-        if add_cfg_to_tree:
-            OmegaConf.resolve(gpt_cfg)
-            gpt_cfg.cfg = gpt_cfg
-
-    return gpt_cfg
-
-
-class Tracker:
-    def __init__(self, config, logger):
-        exp_config = {}
-        for k, v in flatten(OmegaConf.to_container(config)).items():
-            if isinstance(v, (str, int, float, str, bool, torch.Tensor)):
-                exp_config[k] = v
-            else:
-                exp_config[k] = str(v)
-
-        self.logger = logger
-        self.config = config
-
-    def record_train_step(self, metrics, num_examples):
-        if torch.cuda.current_device() == 0:
-            self.logger.log_metrics(
-                metrics,
-                step=int(num_examples / self.config.global_train_batch_size),
-                prefix="train/",
-            )
-
-    def record_eval_step(self, metrics, num_examples):
-        if torch.cuda.current_device() == 0:
-            self.logger.log_metrics(metrics, step=int(num_examples), prefix="val/")
+    return (
+        model,
+        trainer,
+        opt,
+        resume,
+    )
