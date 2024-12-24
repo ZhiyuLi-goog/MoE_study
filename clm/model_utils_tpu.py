@@ -306,31 +306,33 @@ class TensorBoardCallback(TrainerCallback):
     """
 
     def __init__(self, config):
-        exp_config = {}
-        for k, v in flatten(OmegaConf.to_container(config)).items():
-            if isinstance(v, (str, int, float, str, bool, torch.Tensor)):
-                exp_config[k] = v
-            else:
-                exp_config[k] = str(v)
-        self.tb_writer = SummaryWriter(
-            log_dir=os.path.join(config.run_dir, "tensorboard")
-        )
-        self.tb_writer.add_text("model_config", json.dumps(exp_config, indent=2))
+        if xr.process_index() == 0:
+            exp_config = {}
+            for k, v in flatten(OmegaConf.to_container(config)).items():
+                if isinstance(v, (str, int, float, str, bool, torch.Tensor)):
+                    exp_config[k] = v
+                else:
+                    exp_config[k] = str(v)
+            self.tb_writer = SummaryWriter(
+                log_dir=os.path.join(config.run_dir, "tensorboard")
+            )
+            self.tb_writer.add_text("model_config", json.dumps(exp_config, indent=2))
 
     def on_log(self, args, state, control, logs=None, **kwargs):
-        for k, v in logs.items():
-            if isinstance(v, (int, float)):
-                self.tb_writer.add_scalar(k, v, state.global_step)
-            else:
-                logger.warning(
-                    "Trainer is attempting to log a value of "
-                    f'"{v}" of type {type(v)} for key "{k}" as a scalar. '
-                    "This invocation of Tensorboard's writer.add_scalar() "
-                    "is incorrect so we dropped this attribute."
-                )
-        self.tb_writer.flush()
+        if xr.process_index() == 0:
+            for k, v in logs.items():
+                if isinstance(v, (int, float)):
+                    self.tb_writer.add_scalar(k, v, state.global_step)
+                else:
+                    logger.warning(
+                        "Trainer is attempting to log a value of "
+                        f'"{v}" of type {type(v)} for key "{k}" as a scalar. '
+                        "This invocation of Tensorboard's writer.add_scalar() "
+                        "is incorrect so we dropped this attribute."
+                    )
+            self.tb_writer.flush()
 
     def on_train_end(self, args, state, control, **kwargs):
-        if self.tb_writer:
+        if xr.process_index() == 0 and self.tb_writer:
             self.tb_writer.close()
             self.tb_writer = None
