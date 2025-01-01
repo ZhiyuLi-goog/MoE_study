@@ -79,8 +79,6 @@ def main(config: DictConfig):
     )
 
     clmlogger = ClmLogger(config, filename="output.txt")
-    # tokenizer = AutoTokenizer.from_pretrained(config.model.name_or_path)
-    tokenizer = AutoTokenizer.from_pretrained("mistralai/Mixtral-8x7B-v0.1")
 
     if not USE_CUDA:
         config_path = os.path.join(config.run_dir, "config.yaml")
