@@ -7,8 +7,13 @@ from mlperf_logging.mllog import constants
 from pytorch_lightning import Callback
 from pytorch_lightning.loggers import Logger
 from pytorch_lightning.utilities import rank_zero_only
-from transformers import (TrainerCallback, TrainerControl, TrainerState,
-                          TrainingArguments, is_torch_xla_available)
+from transformers import (
+    TrainerCallback,
+    TrainerControl,
+    TrainerState,
+    TrainingArguments,
+    is_torch_xla_available,
+)
 
 if is_torch_xla_available():
     import torch_xla.runtime as xr
@@ -167,9 +172,11 @@ class MLPerfCallback(TrainerCallback):
                 "train_loss",
                 value=state.log_history[-1]["train/loss"] if state.log_history else -1,
                 metadata={
-                    "samples_count": state.global_step * self.global_batch_tokens
-                    if state.log_history
-                    else -1
+                    "samples_count": (
+                        state.global_step * self.global_batch_tokens
+                        if state.log_history
+                        else -1
+                    )
                 },
             )
             control.should_log = True
@@ -223,6 +230,7 @@ class MLPerfCallback(TrainerCallback):
                 )
 
         return control
+
 
 class MLPerfLightningCallback(Callback):
     def __init__(self, logger, global_batch_size: int, sequence_length: int):
