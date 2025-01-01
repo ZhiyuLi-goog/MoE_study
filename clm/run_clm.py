@@ -19,7 +19,6 @@ USE_CUDA = torch.cuda.is_available()  # os.environ.get('USE_CUDA', False)
 OmegaConf.register_new_resolver("multiply", lambda x, y: x * y, replace=True)
 
 if not USE_CUDA:
-    from accelerate import Accelerator
     from model_utils_tpu import (
         TensorBoardCallback,
         get_global_batch_size,
@@ -86,7 +85,6 @@ def main(config: DictConfig):
             OmegaConf.save(config, f)
 
         logger.info(f"log tensorboard to {os.path.join(config.run_dir, 'tensorboard')}")
-        accelerator = Accelerator(log_with="tensorboard", project_dir=config.run_dir)
         setup_xla(config)
         model, optimizer, scheduler = setup_model_optimizer(config)
 
@@ -97,13 +95,6 @@ def main(config: DictConfig):
         raw_datasets = get_datasets(config)
         datasets = process_datasets(raw_datasets, tokenizer, config)
         train_dataset, eval_dataset = datasets["train"], datasets["validation"]
-
-        def preprocess_logits_for_metrics(logits, labels):
-            if isinstance(logits, tuple):
-                # Depending on the model and config, logits may contain extra tensors,
-                # like past_key_values, but logits always come first
-                logits = logits
-            return logits
 
         # Initialize our Trainer
         trainer = Trainer(
