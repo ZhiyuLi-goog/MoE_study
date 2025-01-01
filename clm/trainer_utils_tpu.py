@@ -1,3 +1,4 @@
+import os
 import torch
 from torch.nn import CrossEntropyLoss
 from transformers.trainer_utils import EvalLoopOutput
@@ -17,8 +18,12 @@ import torch_xla.distributed.parallel_loader as pl
 import torch_xla
 import numpy as np
 import datetime
+import torch_xla.debug.profiler as xp
 
 logger = logging.get_logger(__name__)
+PROFILE_PORT = 9012
+server = xp.start_server(PROFILE_PORT)
+logger.info(f"Profiling server started: {server=}")
 
 
 def calculate_tflops_training_per_device(model, config):
@@ -270,5 +275,14 @@ class Trainer:
                 train_loss_list = []
                 train_num_tokens_list = []
                 progress_bar.update(1)
+
+                if self.state.global_step == self.config.xla_profile_step:
+                    xm.wait_device_ops()
+                    duration_ms = 20000
+                    xp.trace_detached(
+                        f"localhost:{PROFILE_PORT}",
+                        os.path.join(self.config.run_dir, "profile"),
+                        duration_ms=duration_ms,
+                    )
 
         logger.info("train finished.")

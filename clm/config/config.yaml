@@ -77,6 +77,8 @@ virtual_pipeline_parallelism: 1
 # cache of models
 cache_local_dir: null
 
+xla_profile_step: -1
+
 
 hydra:
   run:
