@@ -200,6 +200,7 @@ def setup_model_optimizer(config):
         model_config.gmm = False
         model_config.gmm_stack = False
         model_config.capacity_factor = config.model.capacity_factor
+        model_config.output_router_logits = True
         with torch.device("meta"):
             model = (
                 AutoModelForCausalLM.from_config(model_config)
@@ -249,6 +250,8 @@ def setup_model_optimizer(config):
         if config.model.config_path:
             model.apply(model._init_weights)
 
+        no_decay = ["bias", "layer_norm.weight"]
+
     no_decay = ["bias", "layer_norm.weight"]
     optimizer_grouped_parameters = [
         {
@@ -274,7 +277,7 @@ def setup_model_optimizer(config):
         from torch_xla.amp.syncfree import AdamW
 
         optimizer = AdamW(
-            optimizer_grouped_parameters, lr=config.lr, weight_decay=config.weight_decay
+            optimizer_grouped_parameters, lr=config.lr,
         )
     else:
         optimizer = getattr(torch.optim, config.optimizer)(
