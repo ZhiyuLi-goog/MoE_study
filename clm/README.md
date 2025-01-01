@@ -75,7 +75,7 @@ The tpu_type is `v5p-512` or 256 chips to train Mixtral8x22B with a 32,768 token
 ### Install XPK and create GKE cluster.
 ```
 pip install xpk
-xpk cluster create --cluster <cluster_name> --tpu-type=<tpu_type> --num-slices=<num_slices>
+python ~/xpk/xpk.py cluster create --cluster <cluster_name> --tpu-type=<tpu_type> --num-slices=<num_slices>
 ```
 
 ### Run workload in GKE
@@ -85,13 +85,7 @@ xpk cluster create --cluster <cluster_name> --tpu-type=<tpu_type> --num-slices=<
 # that requires users e-signed agreement in place before accessing it
 export HF_TOKEN=<your_hf_token>
 
-xpk workload create \
---cluster <cluster_name> \
---base-docker-image ${IMAGE} \
---workload ${USER}-run \
---tpu-type=<tpu_type> \
---num-slices=<num_slices> \
---command="
+cat << EOS > script.sh
 # Setup envs
 export HF_HOME=/tmp
 export HYDRA_FULL_ERROR=1
@@ -104,15 +98,25 @@ export XLA_USE_SPMD=1
 export XLA_IR_DEBUG=1
 export XLA_HLO_DEBUG=1
 
-cd MoE_study/hf
+# Avoid circular import
+export USE_JAX=false
+
+cd MoE_study/clm
 git pull
 huggingface-cli login --token ${HF_TOKEN}
 # workload script
 # equivalent of 
 #   python run_clm.py +experiment=gbs256_tpu
-python run_clm.py model.config_path=mixtral822.json per_device_train_batch_size=1 optimizer=ADAMW_TORCH_XLA checkpoint_manager_path=gs://lizhiyu-multipods-eu-west/moe/checkpoints-20240803/mixtral822/ model.name_or_path=mistralai/Mixtral-8x22B-v0.1 dataset.dataset_name=c4_mlperf max_steps=250 max_grad_norm=1.0 seed=4321 model.dtype=bfloat16 output_dir=/app/output max_length=32768 dataset.streaming=True tensor_parallelism=1 exp_name=convergence_exp model.capacity_factor=1.25 lr=4e-5 sched=WarmupHoldPolicy
+python run_clm.py model.config_path=mixtral822.json per_device_train_batch_size=1 optimizer=ADAMW_TORCH_XLA checkpoint_manager_path=gs://lizhiyu-multipods-eu-west/moe/checkpoints-20240803/mixtral822/ model.name_or_path=mistralai/Mixtral-8x22B-v0.1 dataset.dataset_name=c4_mlperf max_steps=250 max_grad_norm=1.0 seed=4321 model.dtype=bfloat16 output_dir=/app/output max_length=32768 dataset.streaming=True tensor_parallelism=1 exp_name=convergence_exp model.capacity_factor=1.25 lr=2e-5 sched=WarmupHoldPolicy
 EOF
-"
+
+python ~/xpk/xpk.py workload create \
+--cluster <cluster_name> \
+--base-docker-image ${IMAGE} \
+--workload ${USER}-run \
+--tpu-type=<tpu_type> \
+--num-slices=<num_slices> \
+--command="bash script.sh"
 ```
 
 ## Run Experiments in GCE
@@ -174,6 +178,9 @@ export XLA_USE_SPMD=1
 # Debug info
 export XLA_IR_DEBUG=1
 export XLA_HLO_DEBUG=1
+
+# Avoid circular import
+export USE_JAX=false
 
 cd MoE_study/clm
 git pull
