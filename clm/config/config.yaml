@@ -10,7 +10,8 @@ exp_name: moe_trial
 # random seed for batch sampling
 seed: 0
 
-# the batch size for training; for FSDP, the batch size per GPU is batch_size / (grad_accumulation_steps * num_gpus)
+# the batch size for for each accelerator/device
+# global_train_batch_size = per_device_train_batch_size * num_devices
 per_device_train_batch_size: 1
 global_train_batch_size: ${get_global_batch_size:${per_device_train_batch_size}}
 
