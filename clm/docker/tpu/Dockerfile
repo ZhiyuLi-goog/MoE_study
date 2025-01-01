@@ -8,7 +8,9 @@ RUN pip install datasets accelerate evaluate scikit-learn
 RUN pip install --pre -U jax -f https://storage.googleapis.com/jax-releases/jax_nightly_releases.html
 RUN pip install --pre -U jaxlib -f https://storage.googleapis.com/jax-releases/jaxlib_nightly_releases.html
 RUN pip install libtpu-nightly -f https://storage.googleapis.com/jax-releases/libtpu_releases.html -U --pre
-RUN pip install torch_xla[pallas] -f https://storage.googleapis.com/jax-releases/jax_nightly_releases.html -f https://storage.googleapis.com/jax-releases/jaxlib_nightly_releases.html
+
+# Add --no-deps to avoid version dependency conflicts between all above libraries like jax, pallas, torch or torch_xla
+RUN pip install torch_xla[pallas] -f https://storage.googleapis.com/jax-releases/jax_nightly_releases.html -f https://storage.googleapis.com/jax-releases/jaxlib_nightly_releases.html --no-deps
 
 # custom transformers with static mixtral implementation
 # TODO: import changes in the current repo

@@ -136,7 +136,7 @@ class MLPerfCallback(TrainerCallback):
         self.mllogger.event(
             key=constants.OPT_GRADIENT_CLIP_NORM, value=args.max_grad_norm
         )
-        self.mllogger.event(key=constants.OPT_BASE_LR, value=args.learning_rate)
+        self.mllogger.event(key=constants.OPT_BASE_LR, value=args.lr)
         self.mllogger.event(
             key=constants.GRADIENT_ACCUMULATION_STEPS,
             value=args.gradient_accumulation_steps,
@@ -162,23 +162,19 @@ class MLPerfCallback(TrainerCallback):
         """
         Event called at the end of a training step.
         """
-        if state.global_step % (state.eval_steps) == 0 and state.global_step > 0:
+        if state.global_step % state.eval_steps == 0 and state.global_step > 0:
             self.mllogger.event(
                 "train_loss",
-                value=state.log_history[-1]["loss"] if state.log_history else -1,
+                value=state.log_history[-1]["train/loss"] if state.log_history else -1,
                 metadata={
-                    "samples_count": state.log_history[-1]["step"]
-                    * self.global_batch_size
+                    "samples_count": state.global_step * self.global_batch_tokens
                     if state.log_history
                     else -1
                 },
             )
             control.should_log = True
 
-        if (
-            state.global_step % (state.eval_steps) == 0
-            and state.global_step > args.eval_delay
-        ):
+        if state.global_step % state.eval_steps == 0:
             self.mllogger.end(
                 constants.BLOCK_STOP,
                 value="",
@@ -190,7 +186,7 @@ class MLPerfCallback(TrainerCallback):
                 constants.EVAL_ACCURACY,
                 value=state.log_history[-1]["eval/loss"],
                 metadata={
-                    "samples_count": state.global_step * self.global_batch_tokens
+                    "samples_count": state.global_step * self.global_batch_tokens,
                 },
             )
             latest_eval_loss = float("nan")

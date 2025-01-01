@@ -227,4 +227,4 @@ def process_datasets(raw_datasets, tokenizer, config, use_cuda: bool = True):
             [lm_datasets["validation"], pad_validation_dataset]
         )
 
-    return lm_datasets.with_format("torch")
+    return lm_datasets
