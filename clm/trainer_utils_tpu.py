@@ -19,6 +19,7 @@ import torch_xla
 import numpy as np
 import datetime
 import torch_xla.debug.profiler as xp
+from transformers.models.mixtral.modeling_mixtral import load_balancing_loss_func
 
 logger = logging.get_logger(__name__)
 PROFILE_PORT = 9012
@@ -113,6 +114,38 @@ class Trainer:
         self.state.eval_steps = config.eval_frequency
         self.control = TrainerControl()
         self.per_device_tflops = calculate_tflops_training_per_device(model, config)
+    
+    def compute_loss_w_load_balancing(self, batch):
+        labels = batch.pop("labels")
+        outputs = self.model(**batch)
+        logits = outputs.logits
+        # Flatten the tokens
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+        loss_fct = CrossEntropyLoss(ignore_index=self.config.pad_token_id)
+        # flatten
+        shift_logits = shift_logits.view(-1, logits.shape[-1])
+        shift_labels = shift_labels.view(-1)
+        # Enable model parallelism
+        shift_labels = shift_labels.to(shift_logits.device)
+        loss = loss_fct(shift_logits, shift_labels)
+        num_tokens = (labels != self.config.pad_token_id).sum()
+        loss_weight = (shift_labels != self.config.pad_token_id).sum()
+        aux_loss = load_balancing_loss_func(
+            outputs.router_logits,
+            self.model.num_experts,
+            self.model.num_experts_per_tok,
+            attention_mask=(labels != self.config.pad_token_id),
+        )
+        logger.info(f"{aux_loss=}")
+        loss += aux_loss
+
+        metrics = {
+            "num_tokens": num_tokens,
+            "loss_weight": loss_weight,
+        }
+        return loss, metrics
+
 
     def compute_loss(self, batch):
         labels = batch.pop("labels")
@@ -223,7 +256,7 @@ class Trainer:
                 break
 
             self.model.train()
-            train_loss_step, train_metrics_step = self.compute_loss(batch)
+            train_loss_step, train_metrics_step = self.compute_loss_w_load_balancing(batch)
             train_num_tokens_step = train_metrics_step["num_tokens"]
 
             train_loss_step /= self.config.gradient_accumulation_steps
