@@ -19,6 +19,7 @@ import torch_xla
 import numpy as np
 import datetime
 import torch_xla.debug.profiler as xp
+from transformers.models.mixtral.modeling_mixtral import load_balancing_loss_func
 
 logger = logging.get_logger(__name__)
 PROFILE_PORT = 9012
@@ -114,9 +115,10 @@ class Trainer:
         self.control = TrainerControl()
         self.per_device_tflops = calculate_tflops_training_per_device(model, config)
 
-    def compute_loss(self, batch):
+    def compute_loss(self, batch, add_load_balancing_loss: bool = False):
         labels = batch.pop("labels")
-        logits = self.model(**batch).logits
+        outputs = self.model(**batch)
+        logits = outputs.logits
         # Flatten the tokens
         shift_logits = logits[..., :-1, :].contiguous()
         shift_labels = labels[..., 1:].contiguous()
@@ -133,6 +135,15 @@ class Trainer:
             "num_tokens": num_tokens,
             "loss_weight": loss_weight,
         }
+        if add_load_balancing_loss:
+            assert self.model.training
+            aux_loss = load_balancing_loss_func(
+                outputs.router_logits,
+                self.model.num_experts,
+                self.model.num_experts_per_tok,
+                attention_mask=batch["attention_mask"],
+            )
+            loss += self.model.router_aux_loss_coef * aux_loss
         return loss, metrics
 
     def eval_loop(self):
@@ -142,7 +153,9 @@ class Trainer:
         group_eval_num_tokens: List = []
         for eval_batch in self.eval_dataloader:
             with torch.no_grad():
-                eval_loss_mean, eval_metrics = self.compute_loss(eval_batch)
+                eval_loss_mean, eval_metrics = self.compute_loss(
+                    eval_batch, add_load_balancing_loss=False
+                )
                 eval_num_tokens = eval_metrics["num_tokens"]
                 eval_loss_weight = eval_metrics["loss_weight"]
                 eval_loss_sum = eval_loss_mean * eval_loss_weight
@@ -223,7 +236,9 @@ class Trainer:
                 break
 
             self.model.train()
-            train_loss_step, train_metrics_step = self.compute_loss(batch)
+            train_loss_step, train_metrics_step = self.compute_loss(
+                batch, add_load_balancing_loss=True
+            )
             train_num_tokens_step = train_metrics_step["num_tokens"]
 
             train_loss_step /= self.config.gradient_accumulation_steps
