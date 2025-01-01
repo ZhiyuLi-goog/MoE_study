@@ -114,7 +114,7 @@ class Trainer:
         self.state.eval_steps = config.eval_frequency
         self.control = TrainerControl()
         self.per_device_tflops = calculate_tflops_training_per_device(model, config)
-    
+
     def compute_loss_w_load_balancing(self, batch):
         labels = batch.pop("labels")
         outputs = self.model(**batch)
@@ -138,7 +138,7 @@ class Trainer:
             attention_mask=(labels != self.config.pad_token_id),
         )
         logger.info(f"{aux_loss=}")
-        loss += aux_loss
+        loss += self.model.router_aux_loss_coef * aux_loss
 
         metrics = {
             "num_tokens": num_tokens,
