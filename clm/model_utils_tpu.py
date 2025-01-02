@@ -264,10 +264,8 @@ def setup_model_optimizer(config):
         },
     ]
     if config.optimizer == "ADAMW_TORCH_XLA":
-        from torch_xla.amp.syncfree import AdamW
-
-        optimizer = AdamW(
-            optimizer_grouped_parameters, lr=config.lr, weight_decay=config.weight_decay
+        optimizer = torch.optim.AdamW(
+            optimizer_grouped_parameters, lr=config.lr
         )
     else:
         optimizer = getattr(torch.optim, config.optimizer)(
