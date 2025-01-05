@@ -19,5 +19,11 @@ RUN pip install git+https://github.com/NVIDIA/dllogger#egg=dllogger
 RUN pip install datasets==2.20.0 hydra-core sentencepiece
 RUN pip install "git+https://github.com/mlperf/logging.git"
 
-ADD . /app
-RUN patch --directory=/opt/megatron-lm -p1 < docker/gpu/megatron_core.patch
+# clone current repo
+ARG GIT_REF=main
+RUN git clone https://github.com/ZhiyuLi-goog/MoE_study.git && \
+    cd MoE_study && \
+    echo GIT_REF=${GIT_REF} && \
+    git checkout ${GIT_REF}
+
+RUN patch --directory=/opt/megatron-lm -p1 < MoE_study/clm/docker/gpu/megatron_core.patch
