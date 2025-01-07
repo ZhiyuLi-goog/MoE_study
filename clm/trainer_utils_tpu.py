@@ -280,12 +280,13 @@ class Trainer:
                 last_step_completion = new_time
 
                 xm.add_step_closure(self.update_step)
-                xm.add_step_closure(self.log, args=(logs,))
-                for callback in self.callbacks:
-                    xm.add_step_closure(
-                        callback.on_step_end,
-                        args=(self.config, self.state, self.control),
-                    )
+                if (self.state.global_step + 1) % self.config.log_period == 0:
+                    xm.add_step_closure(self.log, args=(logs,))
+                    for callback in self.callbacks:
+                        xm.add_step_closure(
+                            callback.on_step_end,
+                            args=(self.config, self.state, self.control),
+                        )
 
                 train_loss_list = []
                 train_num_tokens_list = []

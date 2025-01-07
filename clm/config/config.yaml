@@ -80,6 +80,7 @@ cache_local_dir: null
 
 xla_profile_step: -1
 
+log_period: 10
 
 hydra:
   run:
