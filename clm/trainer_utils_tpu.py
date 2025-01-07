@@ -151,6 +151,7 @@ class Trainer:
         group_eval_loss_sum: List = []
         group_eval_loss_weight: List = []
         group_eval_num_tokens: List = []
+        group_eval_loss_mean: List = []
         for eval_batch in self.eval_dataloader:
             with torch.no_grad():
                 eval_loss_mean, eval_metrics = self.compute_loss(
@@ -162,12 +163,14 @@ class Trainer:
                 group_eval_loss_sum.append(eval_loss_sum)
                 group_eval_loss_weight.append(eval_loss_weight)
                 group_eval_num_tokens.append(eval_num_tokens)
+                group_eval_loss_mean.append(eval_loss_mean)
 
         total_eval_loss_sum = sum(group_eval_loss_sum)
         total_eval_loss_weight = sum(group_eval_loss_weight)
         total_eval_num_tokens = sum(group_eval_num_tokens)
         group_eval_metrics = {
-            "eval/loss": (total_eval_loss_sum / total_eval_loss_weight),
+            "eval/loss": sum(group_eval_loss_mean) / len(group_eval_loss_mean),
+            "eval/acc_loss": (total_eval_loss_sum / total_eval_loss_weight),
             "eval/num_tokens": total_eval_num_tokens,
             "eval/total_weights": total_eval_loss_weight,
         }
