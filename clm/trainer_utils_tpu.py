@@ -237,7 +237,7 @@ class Trainer:
 
             self.model.train()
             train_loss_step, train_metrics_step = self.compute_loss(
-                batch, add_load_balancing_loss=True
+                batch, add_load_balancing_loss=False,
             )
             train_num_tokens_step = train_metrics_step["num_tokens"]
 
