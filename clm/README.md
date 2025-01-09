@@ -1,7 +1,8 @@
 # 1. MLPerf Training: MoE Benchmark
 This benchmark focuses on training Mixtral8x22B with a 32,768 token sequence length with key features:
 * spare mixture-of-experts architecture: we specifically use the [Mixtral-8x22B-v0.1](https://huggingface.co/mistralai/Mixtral-8x22B-v0.1) architecture and checkpoint. This allows for greater computational efficiency compared to dense models like GPT-3 or LLaMA2-3, as only a subset of experts are activated during training and inferencing.
-* Extended sequence length: Handles sequences up to 32,768 tokens long, enabling larger contexts window
+* extended sequence length: handles sequences up to 32,768 tokens long, enabling larger contexts window
+* dropped implementation: means dropping tokens assigned to experts that are already at capacity. That would provide more consistent performance to effectively address load balancing issue. Inspired by [Switch Transformer](https://arxiv.org/pdf/2101.03961), we set `capacity_factor=1.25` to determine the maximum token load for each expert.
 
 # 2. Dataset
 This benchmark uses the
@@ -22,9 +23,12 @@ The resplit dataset uses 3.0.4 as its version to differenciate from the original
 3.0.1 version, and it's available on
 [GCS](https://console.cloud.google.com/storage/browser/mlperf-llm-public2/c4/en/3.0.4)
 
+The dataset is also availabe as s3 artifacts. See [the guide](#9-s3-artifacts-download) for downloading.
+
+
 Note this benchmark uses the same dataset as gpt3-175b benchmark see [dataset in gpt3-175b benchmark for reference](https://github.com/mlcommons/training/blob/master/large_language_model/paxml/README.md#2-dataset).
 
-# 3. Model, Checkpoint, & Optimizer
+# 3. Model, Checkpoint, Optimizer, & Tokenizer
 we specifically use the [Mixtral-8x22B-v0.1](https://huggingface.co/mistralai/Mixtral-8x22B-v0.1) architecture and checkpoint. 
 
 | Config | Value |
@@ -39,6 +43,18 @@ we specifically use the [Mixtral-8x22B-v0.1](https://huggingface.co/mistralai/Mi
 | intermediate_size | 16384 |
 
 As for optimizer, we use [adamw](https://pytorch.org/docs/stable/generated/torch.optim.AdamW.html).
+
+We are using the sentencepiece tokenizer under [Mixtral-8x22B-v0.1](https://huggingface.co/mistralai/Mixtral-8x22B-v0.1)
+```
+from transformers import AutoTokenizer
+tokenizer = AutoTokenizer.from_pretrained(
+    "mistralai/Mixtral-8x22B-v0.1",
+    add_eos_token=False,
+    add_bos_token=False,
+    use_fast=False,
+)
+```
+Note, we should use `use_fast=False` to avoid using the wrong tokenizer implmented in rust. We already found some token mismatch between 2 tokenizers, and it affected loss curve sutbly in previous experiments.
 
 # 4. Evaluation
 ## Evaluation loss metric
@@ -69,7 +85,33 @@ bash docker/tpu/build_and_push_image.sh
 IMAGE=<my_image> bash docker/tpu/build_and_push_image.sh
 ```
 
-The tpu_type is `v5p-512` or 256 chips to train Mixtral8x22B with a 32,768 token sequence length.
+### Prebuilt Docker Images
+
+For now, we have uploaded docker image tar ball to s3 bucket. See [the guide](#9-s3-artifacts-download) for downloading.
+
+Once downloaded, we can use the following command to extract:
+```
+docker load -i pytorch-xla-moe-20241031.tar
+docker load -i pytorch-xla-moe-20250101.tar
+```
+
+Both docker images are tested, either one should be suitable for our needs.
+
+## Checkpoint
+We provided 2 pre-converted checkpoint for full FSDP and 2D FSDP TP sharding respectively:
+* Mixtral-8x22B-v0.1-fsdp: use for `tensor_parallelism=1`
+* Mixtral-8x22B-v0.1-2d-fsdp-tp: use for `tensor_parallelism` > 1
+
+See [the guide](#9-s3-artifacts-download) for downloading.
+
+These above checkpoint conversion is done by using [distributed_checkpoint_saving.py](scripts/tpu/distributed_checkpoint_saving.py).
+
+## Capacity Needed
+To train the Mixtral 8x22B model with a 32,768 token sequence length:
+
+* Minimum Requirement: 64 TPU v5p chips (v5p-128).
+* Convergence Test: 256 TPU v5p chips (v5p-512) were used.
+
 ## [recommended] Run Experiments in GKE
 
 ### Install XPK and create GKE cluster.
@@ -193,6 +235,20 @@ EOF
 "
 ```
 
+#### Logging
+The workload starts only after all worker SSH connections are established, then it is safe and recommended to manually exit.
+The provided scripts may exceed the SSH connection timeout without manully exit, causing unexpected command retries, which may lead to some error message stating that command error since the TPU devices are currently in use. However, this should not disrupt your existing workload.
+
+To obtain the logs, establish an SSH connection to a virtual machine and retrieve the Docker container logs.
+```
+gcloud alpha compute tpus tpu-vm ssh ${TPU_NAME} --project ${PROJECT_ID} --zone ${ZONE} --worker=0
+```
+
+Run `docker logs` to retrieve back logs.
+```
+sudo docker logs -f <container>
+```
+
 ## Dry-run Tests
 To perform dry-run tests with different models/parameters on a smaller scale like `v4-8`, use the following python commands as workload:
 ### Test with a smaller mixtral model
@@ -259,4 +315,44 @@ kubectl logs "<pod_name>"
 
 ```
 black clm/
+```
+
+# 9. S3 artifacts download
+The dataset, docker image and the checkpoints are available to download from an S3 bucket. You can download this data from the bucket using Rclone as follows:
+
+To run Rclone on Windows, you can download the executable [here](https://rclone.org/install/#windows).
+To install Rclone on Linux/macOS/BSD systems, run:
+```
+sudo -v ; curl https://rclone.org/install.sh | sudo bash
+```
+Once Rclone is installed, run the following command to authenticate with the bucket:
+```
+rclone config create mlc-training s3 provider=Cloudflare access_key_id=76ea42eadb867e854061a1806220ee1e secret_access_key=a53625c4d45e3ca8ac0df8a353ea3a41ffc3292aa25259addd8b7dc5a6ce2936 endpoint=https://c2686074cb2caf5cbaf6d134bdba8b47.r2.cloudflarestorage.com
+```
+You can then navigate in the terminal to your desired download directory and run the following commands to download the dataset and checkpoints:
+
+## Text Datasets
+**Dataset**
+* Train Dataset`c4/en_json/3.0.1`
+* Eval Dataset `c4/en_val_subset_json`
+```
+mkdir -p datasets
+rclone copy mlc-training:mlcommons-training-wg-public/mixtral_8x22b/datasets ./datasets -P
+```
+## Checkpoints
+* Mixtral-8x22B-v0.1-fsdp: use for `tensor_parallelism=1`
+```
+mkdir -p checkpoints/Mixtral-8x22B-v0.1-fsdp
+rclone copy mlc-training:mlcommons-training-wg-public/mixtral_8x22b/checkpoints/Mixtral-8x22B-v0.1-fsdp ./datasets/Mixtral-8x22B-v0.1-fsdp -P
+```
+* Mixtral-8x22B-v0.1-2d-fsdp-tp: use for `tensor_parallelism` > 1
+```
+mkdir -p checkpoints/Mixtral-8x22B-v0.1-2d-fsdp-tp
+rclone copy mlc-training:mlcommons-training-wg-public/mixtral_8x22b/checkpoints/Mixtral-8x22B-v0.1-2d-fsdp-tp ./datasets/Mixtral-8x22B-v0.1-fsdp -P
+```
+
+## Docker Images
+```
+mkdir -p docker-images
+rclone copy mlc-training:mlcommons-training-wg-public/mixtral_8x22b/docker-images ./docker-images -P
 ```
