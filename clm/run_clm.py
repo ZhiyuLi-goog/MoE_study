@@ -39,7 +39,6 @@ else:
     from model_utils_gpu import setup_distributed, setup_model_and_trainer
     from nemo import lightning as nl
     from nemo.collections import llm
-    from trainer_utils_gpu import Trainer
 
     OmegaConf.register_new_resolver("int_div", lambda x, y: x // y, replace=True)
     OmegaConf.register_new_resolver(
