@@ -280,7 +280,7 @@ class Trainer:
                 last_step_completion = new_time
 
                 xm.add_step_closure(self.update_step)
-                if (self.state.global_step + 1) % self.config.log_period == 0:
+                if (self.state.global_step + 1) % self.config.log_frequency == 0:
                     xm.add_step_closure(self.log, args=(logs,))
                     for callback in self.callbacks:
                         xm.add_step_closure(

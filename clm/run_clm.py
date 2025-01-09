@@ -183,7 +183,7 @@ def main(config: DictConfig):
             scheduler=config.sched,
             max_grad_norm=config.max_grad_norm,
             eval_frequency=config.eval_frequency,
-            log_frequency=1,
+            log_frequency=config.log_frequency,
             max_steps=config.max_steps,
             logger=metrics_logger,
             callbacks=callbacks,
