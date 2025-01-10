@@ -86,6 +86,20 @@ def main(config: DictConfig):
                 f"{key} std={tensor.std(dim)}"
                 )
 
+    def dump_tensor(key, tensor, dim, filepath):
+        if dim is None:
+            logger.info(f"{key}: dtype={tensor.dtype}, shape={tensor.shape}, mean={tensor.mean()}, min={tensor.min()}, max={tensor.max()}, std={tensor.std()}")
+        else:
+            mean = tensor.mean(dim).cpu().detach().numpy()
+            #min = tensor.min(dim).cpu().detach().numpy()
+            #max = tensor.max(dim).cpu().detach().numpy()
+            #std = tensor.std(dim).cpu().detach().numpy()
+
+            name = key + "_mean"
+            outfile = os.path.join(filepath, name)
+            np.save(outfile, mean)
+
+
     model, optimizer, scheduler = setup_model_optimizer(config)
     for k, v in model.state_dict().items():
         xm.add_step_closure(print_tensor, args=(k, v, None))
@@ -121,9 +135,11 @@ def main(config: DictConfig):
             outputs = model(**batch)
             logits = outputs.logits
             if i == 0:
-                xm.add_step_closure(print_tensor, args=('logits', logits[:1], -1))
+                #xm.add_step_closure(print_tensor, args=('logits', logits[:1], -1))
+                xm.add_step_closure(dump_tensor, args=('logits', logits[:1], -1, config.run_dir))
                 for i, layer_output in enumerate(outputs.hidden_states):
-                    xm.add_step_closure(print_tensor, args=(f'layer_output_{i}', layer_output[:1], -1))
+                    #xm.add_step_closure(print_tensor, args=(f'layer_output_{i}', layer_output[:1], -1))
+                    xm.add_step_closure(dump_tensor, args=(f'layer_output_{i}', layer_output[:1], -1, config.run_dir))
 
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
