@@ -90,7 +90,7 @@ def main(config: DictConfig):
         if dim is None:
             logger.info(f"{key}: dtype={tensor.dtype}, shape={tensor.shape}, mean={tensor.mean()}, min={tensor.min()}, max={tensor.max()}, std={tensor.std()}")
         else:
-            mean = tensor.mean(dim).cpu().detach().numpy()
+            mean = tensor.mean(dim).cpu().detach().to(torch.float32).numpy()
             #min = tensor.min(dim).cpu().detach().numpy()
             #max = tensor.max(dim).cpu().detach().numpy()
             #std = tensor.std(dim).cpu().detach().numpy()
