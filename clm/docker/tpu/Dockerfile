@@ -1,13 +1,14 @@
 FROM us-central1-docker.pkg.dev/tpu-pytorch-releases/docker/xla:nightly_3.10_tpuvm 
 
+FROM us-docker.pkg.dev/cloud-tpu-images/jax-stable-stack/tpu:jax0.4.37-rev1
 WORKDIR /app
 
 RUN pip install datasets==3.2.0 accelerate==1.2.1 evaluate==0.4.3 scikit-learn==1.6.0
 
-# Install jax, jaxlib, libtpu nightly
-RUN pip install --pre -U jax -f https://storage.googleapis.com/jax-releases/jax_nightly_releases.html
-RUN pip install --pre -U jaxlib -f https://storage.googleapis.com/jax-releases/jaxlib_nightly_releases.html
-RUN pip install libtpu-nightly -f https://storage.googleapis.com/jax-releases/libtpu_releases.html -U --pre
+# use stable stack now to depricate the nightly installation for Install jax, jaxlib, libtpu nightly
+#RUN pip install --pre -U jax -f https://storage.googleapis.com/jax-releases/jax_nightly_releases.html
+#RUN pip install --pre -U jaxlib -f https://storage.googleapis.com/jax-releases/jaxlib_nightly_releases.html
+#RUN pip install libtpu-nightly -f https://storage.googleapis.com/jax-releases/libtpu_releases.html -U --pre
 
 # Add --no-deps to avoid version dependency conflicts between all above libraries like jax, pallas, torch or torch_xla
 RUN pip install torch_xla[pallas] -f https://storage.googleapis.com/jax-releases/jax_nightly_releases.html -f https://storage.googleapis.com/jax-releases/jaxlib_nightly_releases.html --no-deps
@@ -48,7 +49,7 @@ WORKDIR /app
 
 # clone current repo
 ARG GIT_REF=main
-RUN git clone https://github.com/ZhiyuLi-goog/MoE_study.git && \
+RUN git clone https://github.com/suexu1025/MoE_study.git && \
     cd MoE_study && \
     echo GIT_REF=${GIT_REF} && \
     git checkout ${GIT_REF}
