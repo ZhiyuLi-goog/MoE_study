@@ -149,7 +149,7 @@ def process_datasets(raw_datasets, tokenizer, config, use_cuda: bool = True):
         for key in src_datasets.keys():
             # use validation batch_size to avoid dropping remainders in group_text
             # 2x max_sequence_length is a good batch_size to avoid too many paddings
-            batch_size = 24567 if key == "validation" else 65536*2
+            batch_size = 24567 if key == "validation" else 65536
             # only apply streaming in train dataset
             if key == "train" and config.dataset.streaming:
                 tgt_datasets[key] = src_datasets[key].map(
@@ -187,14 +187,14 @@ def process_datasets(raw_datasets, tokenizer, config, use_cuda: bool = True):
         for key, dataset in tokenized_datasets.items()
     }
     block_size = config.max_length
-
+    padding = if key == "train" 0 else 1
     # Main data processing function that will concatenate all texts from our dataset and generate chunks of block_size.
     def group_texts(examples):
         # Concatenate all texts.
         concatenated_examples = {k: list(chain(*examples[k])) for k in examples.keys()}
         total_length = len(concatenated_examples[list(examples.keys())[0]])
 
-        if total_length % block_size != 0:
+        if total_length % block_size != 0 and padding > 0:
             pad_length = (total_length // block_size + 1) * block_size - total_length
             for k in concatenated_examples.keys():
                 concatenated_examples[k].extend([config.pad_token_id] * pad_length)
