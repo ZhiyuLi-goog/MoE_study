@@ -35,7 +35,7 @@ def get_datasets(config):
         train_data_files = {
             "train": [
                 f'{os.path.join(config.dataset.train_dataset_path, f"c4-train.{i:05d}-of-01024.json")}'
-                for i in range(768, 1024)
+                for i in range(1020, 1024)
             ],
         }
         eval_data_files = {
