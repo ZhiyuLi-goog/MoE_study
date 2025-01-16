@@ -187,7 +187,7 @@ def process_datasets(raw_datasets, tokenizer, config, use_cuda: bool = True):
         for key, dataset in tokenized_datasets.items()
     }
     block_size = config.max_length
-    padding = if key == "train" 0 else 1
+    padding = 1 if key == "train" else 1
     # Main data processing function that will concatenate all texts from our dataset and generate chunks of block_size.
     def group_texts(examples):
         # Concatenate all texts.
