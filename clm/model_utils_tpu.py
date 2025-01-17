@@ -268,7 +268,7 @@ def setup_model_optimizer(config):
 
         no_decay = ["bias", "layer_norm.weight"]
 
-    no_decay = ["bias", "layer_norm.weight"]
+    no_decay = ["bias"]
     optimizer_grouped_parameters = [
         {
             "params": [
