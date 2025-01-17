@@ -114,6 +114,8 @@ def main(config: DictConfig):
     group_eval_loss_weight: List = []
     group_eval_num_tokens: List = []
     for i, batch in enumerate(eval_dataloader):
+        if i != 0:
+            return
         with torch.no_grad():
             if i == 0:
                 logger.info(f"{batch['input_ids']=}")
@@ -124,6 +126,7 @@ def main(config: DictConfig):
                 xm.add_step_closure(print_tensor, args=('logits', logits[:1], -1))
                 for i, layer_output in enumerate(outputs.hidden_states):
                     xm.add_step_closure(print_tensor, args=(f'layer_output_{i}', layer_output[:1], -1))
+                
 
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
