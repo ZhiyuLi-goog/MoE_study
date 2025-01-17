@@ -187,9 +187,8 @@ def process_datasets(raw_datasets, tokenizer, config, use_cuda: bool = True):
         for key, dataset in tokenized_datasets.items()
     }
     block_size = config.max_length
-    padding = 1 if key == "train" else 1
     # Main data processing function that will concatenate all texts from our dataset and generate chunks of block_size.
-    def group_texts(examples):
+    def group_texts(examples, padding):
         # Concatenate all texts.
         concatenated_examples = {k: list(chain(*examples[k])) for k in examples.keys()}
         total_length = len(concatenated_examples[list(examples.keys())[0]])
@@ -211,9 +210,16 @@ def process_datasets(raw_datasets, tokenizer, config, use_cuda: bool = True):
 
         return result
 
-    lm_datasets = process_datasets_function(
-        tokenized_datasets,
-        group_texts,
+    group_texts_train = partial(group_texts, padding = 0)
+    group_texts_eval = partial(group_texts, padding = 1)
+    lm_datasets["train"] = process_datasets_function(
+        tokenized_datasets["train"],
+        group_texts_train,
+        desc=f"Grouping texts in chunks of {block_size}",
+    )
+    lm_datasets["validation"] = process_datasets_function(
+        tokenized_datasets["validation"],
+        group_texts_val,
         desc=f"Grouping texts in chunks of {block_size}",
     )
     if config.shuffle:
