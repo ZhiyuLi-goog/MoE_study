@@ -74,17 +74,20 @@ def main(config: DictConfig):
     accelerator = Accelerator(log_with="tensorboard", project_dir=config.run_dir)
     setup_xla(config)
 
+    rank = torch.distributed.get_rank()
+
     def print_tensor(key, tensor, dim):
-        if dim is None:
-            logger.info(f"{key}: dtype={tensor.dtype}, shape={tensor.shape}, mean={tensor.mean()}, min={tensor.min()}, max={tensor.max()}, std={tensor.std()}")
-        else:
-            logger.info( 
-                f"{key} dtype={tensor.dtype}, shape={tensor.shape}\n"
-                f"{key} mean={tensor.mean(dim)}\n"
-                f"{key} min={tensor.min(dim)[0]}\n"
-                f"{key} max={tensor.max(dim)[0]}\n"
-                f"{key} std={tensor.std(dim)}"
-                )
+        if rank == 0:
+            if dim is None:
+                logger.info(f"{key}: dtype={tensor.dtype}, shape={tensor.shape}, mean={tensor.mean()}, min={tensor.min()}, max={tensor.max()}, std={tensor.std()}")
+            else:
+                logger.info( 
+                    f"{key} dtype={tensor.dtype}, shape={tensor.shape}\n"
+                    f"{key} mean={tensor.mean(dim)}\n"
+                    f"{key} min={tensor.min(dim)[0]}\n"
+                    f"{key} max={tensor.max(dim)[0]}\n"
+                    f"{key} std={tensor.std(dim)}"
+                    )
 
     model, optimizer, scheduler = setup_model_optimizer(config)
     for k, v in model.state_dict().items():
