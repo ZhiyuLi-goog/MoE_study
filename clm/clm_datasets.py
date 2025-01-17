@@ -25,6 +25,7 @@ from transformers.testing_utils import CaptureLogger
 from omegaconf import DictConfig
 from transformers import AutoTokenizer
 import hydra
+from functools import partial
 
 logger = logging.get_logger(__name__)
 
