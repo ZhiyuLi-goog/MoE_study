@@ -8,7 +8,7 @@ import numpy as np
 
 from transformers import set_seed
 from file_utils import get_file
-from mlperf_logging_utils import MLPerfCallback
+from mlperf_logging_utils import MLPerfCallback, get_rank
 import torch_xla.core.xla_model as xm
 import torch_xla.distributed.spmd as xs
 from torch.utils.data import DataLoader
@@ -74,7 +74,7 @@ def main(config: DictConfig):
     accelerator = Accelerator(log_with="tensorboard", project_dir=config.run_dir)
     setup_xla(config)
 
-    rank = torch.distributed.get_rank()
+    rank = get_rank()
 
     def print_tensor(key, tensor, dim):
         if rank == 0:
