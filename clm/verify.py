@@ -116,12 +116,19 @@ def main(config: DictConfig):
     group_eval_loss_sum: List = []
     group_eval_loss_weight: List = []
     group_eval_num_tokens: List = []
+    batch = next(iter(eval_dataloader))
+
+    with torch.no_grad():
+        logger.info(f"{batch['input_ids']=}")
+        labels = batch.pop("labels")
+        outputs = model(**batch)
+        logits = outputs.logits
+        xm.add_step_closure(print_tensor, args=('logits', logits[:1], -1))
+        xm.add_step_closure(print_tensor, args=(f'layer_output_{i}', layer_output[:1], -1))
+
+    return 
     for i, batch in enumerate(eval_dataloader):
-        if i != 0:
-            return
         with torch.no_grad():
-            # if i == 0:
-            #     logger.info(f"{batch['input_ids']=}")
             labels = batch.pop("labels")
             outputs = model(**batch)
             logits = outputs.logits
