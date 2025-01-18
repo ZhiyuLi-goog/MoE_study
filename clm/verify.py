@@ -120,8 +120,8 @@ def main(config: DictConfig):
         if i != 0:
             return
         with torch.no_grad():
-            if i == 0:
-                logger.info(f"{batch['input_ids']=}")
+            # if i == 0:
+            #     logger.info(f"{batch['input_ids']=}")
             labels = batch.pop("labels")
             outputs = model(**batch)
             logits = outputs.logits
