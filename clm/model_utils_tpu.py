@@ -271,7 +271,7 @@ def setup_model_optimizer(config):
             "weight_decay": 0.0,
         },
     ]
-    print(optimizer_grouped_parameters)
+    #print(optimizer_grouped_parameters)
 
     if config.optimizer == "ADAMW_TORCH_XLA":
         from torch_xla.amp.syncfree import AdamW
