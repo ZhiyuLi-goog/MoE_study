@@ -268,7 +268,7 @@ def setup_model_optimizer(config):
 
         no_decay = ["bias", "layer_norm.weight"]
 
-    no_decay = ["bias", "layer_norm.weight"]
+    no_decay = ["bias", "layer_norm.weight", "layernorm.weight"]
     optimizer_grouped_parameters = [
         {
             "params": [
@@ -287,6 +287,13 @@ def setup_model_optimizer(config):
             "weight_decay": 0.0,
         },
     ]
+    # add debug msg to make sure no weight decay on bias and layer norm
+    for n, p in model.named_parameters():
+        if not any(nd in n for nd in no_decay):
+            print("decay name: ", n) 
+        else:
+            print("no decay name: ", n)
+
     if config.optimizer == "ADAMW_TORCH_XLA":
         from torch_xla.amp.syncfree import AdamW
 
