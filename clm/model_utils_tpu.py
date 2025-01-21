@@ -266,9 +266,8 @@ def setup_model_optimizer(config):
         if config.model.config_path:
             model.apply(model._init_weights)
 
-        no_decay = ["bias", "layer_norm.weight"]
-
-    no_decay = ["bias", "layer_norm.weight", "layernorm.weight"]
+    no_decay = ["bias", "layer_norm.weight", "layernorm.weight", "norm.weight"]
+    
     optimizer_grouped_parameters = [
         {
             "params": [
