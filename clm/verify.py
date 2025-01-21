@@ -119,7 +119,7 @@ def main(config: DictConfig):
     batch = next(iter(eval_dataloader))
 
     with torch.no_grad():
-        logger.info(f"{batch['input_ids']=}")
+        #logger.info(f"{batch['input_ids']=}")
         labels = batch.pop("labels")
         outputs = model(**batch)
 
