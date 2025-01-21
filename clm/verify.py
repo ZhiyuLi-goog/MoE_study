@@ -122,6 +122,8 @@ def main(config: DictConfig):
         logger.info(f"{batch['input_ids']=}")
         labels = batch.pop("labels")
         outputs = model(**batch)
+
+        logger.info(f"{outputs}")
         logits = outputs.logits
         xm.add_step_closure(print_tensor, args=('logits', logits[:1], -1))
         for i, layer_output in enumerate(outputs.hidden_states):
