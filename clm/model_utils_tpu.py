@@ -249,15 +249,36 @@ def setup_model_optimizer(config):
         if config.model.config_path:
             model.apply(model._init_weights)
 
+    no_decay = ["bias", "layer_norm.weight"]
+    optimizer_grouped_parameters = [
+        {
+            "params": [
+                p
+                for n, p in model.named_parameters()
+                if not any(nd in n for nd in no_decay)
+            ],
+            "weight_decay": config.weight_decay,
+        },
+        {
+            "params": [
+                p
+                for n, p in model.named_parameters()
+                if any(nd in n for nd in no_decay)
+            ],
+            "weight_decay": 0.0,
+        },
+    ]
+    print(optimizer_grouped_parameters)
+
     if config.optimizer == "ADAMW_TORCH_XLA":
         from torch_xla.amp.syncfree import AdamW
 
         optimizer = AdamW(
-            model.parameters(), lr=config.lr, weight_decay=config.weight_decay
+            optimizer_grouped_parameters, lr=config.lr, weight_decay=config.weight_decay
         )
     else:
         optimizer = getattr(torch.optim, config.optimizer)(
-            model.parameters(), lr=config.lr
+            optimizer_grouped_parameters, lr=config.lr
         )
 
     # initialize optimizer states and scheduler
