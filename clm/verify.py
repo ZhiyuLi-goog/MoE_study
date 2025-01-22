@@ -137,9 +137,9 @@ def main(config: DictConfig):
             outputs = model(**batch)
             logits = outputs.logits
             if i == 0:
-                xm.add_step_closure(print_tensor, args=('logits', logits[:1], -1))
+                xm.add_step_closure(print_tensor, args=('logits', logits[:1], None))
                 for i, layer_output in enumerate(outputs.hidden_states):
-                    xm.add_step_closure(print_tensor, args=(f'layer_output_{i}', layer_output[:1], -1))
+                    xm.add_step_closure(print_tensor, args=(f'layer_output_{i}', layer_output[:1], None))
                 
 
             shift_logits = logits[..., :-1, :].contiguous()
