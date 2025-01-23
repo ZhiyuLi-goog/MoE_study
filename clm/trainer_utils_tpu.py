@@ -57,6 +57,18 @@ def calculate_tflops_training_per_device(model, config):
     )
     return tflops_training_per_device
 
+def print_tensor(key, tensor, dim):
+    if rank == 0:
+        if dim is None:
+            logger.info(f"{key}: dtype={tensor.dtype}, shape={tensor.shape}, mean={tensor.mean()}, min={tensor.min()}, max={tensor.max()}, std={tensor.std()}")
+        else:
+            logger.info( 
+                    f"{key} dtype={tensor.dtype}, shape={tensor.shape}\n"
+                    f"{key} mean={tensor.mean(dim)}\n"
+                    f"{key} min={tensor.min(dim)[0]}\n"
+                    f"{key} max={tensor.max(dim)[0]}\n"
+                    f"{key} std={tensor.std(dim)}"
+                    )
 
 class Trainer:
     def __init__(
@@ -111,10 +123,18 @@ class Trainer:
         self.control = TrainerControl()
         self.per_device_tflops = calculate_tflops_training_per_device(model, config)
 
-    def compute_loss(self, batch, add_load_balancing_loss: bool = False):
+    def compute_loss(self, batch, add_load_balancing_loss: bool = False, output_stas: bool = False):
         labels = batch.pop("labels")
         outputs = self.model(**batch)
         logits = outputs.logits
+
+        if output_stas:
+            xm.add_step_closure(print_tensor, args=('logits', logits[:1], None))
+                for i, layer_output in enumerate(outputs.hidden_states):
+                    xm.add_step_closure(print_tensor, args=(f'layer_output_{i}', layer_output[:1], None))
+            xm.mark_step()
+            logger.info(f"complete dump stas")
+
         # Flatten the tokens
         shift_logits = logits[..., :-1, :].contiguous()
         shift_labels = labels[..., 1:].contiguous()
@@ -233,7 +253,7 @@ class Trainer:
 
             self.model.train()
             train_loss_step, train_metrics_step = self.compute_loss(
-                batch, add_load_balancing_loss=True
+                batch, add_load_balancing_loss=True, output_stas = True
             )
             train_num_tokens_step = train_metrics_step["num_tokens"]
 

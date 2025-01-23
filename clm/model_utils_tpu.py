@@ -194,6 +194,7 @@ def setup_model_optimizer(config):
 
     logger.info("loading model")
     if config.model.config_path:
+        logger.info("train from screatch")
         model_config = AutoConfig.from_pretrained(config.model.config_path, output_hidden_states=True, return_dict=True)
         model_config.static = True
         model_config.flash_attention = config.model.flash_attention
@@ -208,6 +209,7 @@ def setup_model_optimizer(config):
                 .to(torch.bfloat16)
             )
     else:
+        logger.info("depricated: train from model name")
         model = AutoModelForCausalLM.from_pretrained(
             config.model.name_or_path,
             cache_dir=config.cache_local_dir,
