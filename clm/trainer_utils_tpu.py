@@ -58,17 +58,16 @@ def calculate_tflops_training_per_device(model, config):
     return tflops_training_per_device
 
 def print_tensor(key, tensor, dim):
-    if rank == 0:
-        if dim is None:
-            logger.info(f"{key}: dtype={tensor.dtype}, shape={tensor.shape}, mean={tensor.mean()}, min={tensor.min()}, max={tensor.max()}, std={tensor.std()}")
-        else:
-            logger.info( 
-                    f"{key} dtype={tensor.dtype}, shape={tensor.shape}\n"
-                    f"{key} mean={tensor.mean(dim)}\n"
-                    f"{key} min={tensor.min(dim)[0]}\n"
-                    f"{key} max={tensor.max(dim)[0]}\n"
-                    f"{key} std={tensor.std(dim)}"
-                    )
+    if dim is None:
+        logger.info(f"{key}: dtype={tensor.dtype}, shape={tensor.shape}, mean={tensor.mean()}, min={tensor.min()}, max={tensor.max()}, std={tensor.std()}")
+    else:
+        logger.info( 
+                f"{key} dtype={tensor.dtype}, shape={tensor.shape}\n"
+                f"{key} mean={tensor.mean(dim)}\n"
+                f"{key} min={tensor.min(dim)[0]}\n"
+                f"{key} max={tensor.max(dim)[0]}\n"
+                f"{key} std={tensor.std(dim)}"
+                )
 
 class Trainer:
     def __init__(
