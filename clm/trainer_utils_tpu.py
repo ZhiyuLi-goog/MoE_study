@@ -289,6 +289,7 @@ class Trainer:
             train_loss_step.backward()
             train_loss_list.append(train_loss_step)
             train_num_tokens_list.append(train_num_tokens_step)
+            xm.mark_step()
             if (batch_idx + 1) % self.config.gradient_accumulation_steps == 0:
                 # ensure wrap updating global step to avoid async in lazy printing
                 logs: Dict[str, float] = {}
