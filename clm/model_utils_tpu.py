@@ -265,6 +265,11 @@ def setup_model_optimizer(config):
     else:
         if config.model.config_path:
             model.apply(model._init_weights)
+        
+        for name, param in model.named_parameters():
+            if name in ["layer_norm.weight", "layernorm.weight", "norm.weight"]:
+                param.weight.ones_()
+                logger.info("init ones for layer norm")
 
     no_decay = ["bias", "layer_norm.weight", "layernorm.weight", "norm.weight"]
     
