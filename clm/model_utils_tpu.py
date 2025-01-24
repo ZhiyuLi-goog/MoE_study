@@ -267,9 +267,9 @@ def setup_model_optimizer(config):
             model.apply(model._init_weights)
         
         for layer in model.model.layers:
-            layer.input_layernorm.weight.data.ones_()
-            layer.post_attention_layernorm.weight.data.ones_()
-        model.model.norm.weight.data.ones_()
+            layer.input_layernorm.weight.data.fill_(1.0)
+            layer.post_attention_layernorm.weight.data.fill_(1.0)
+        model.model.norm.weight.data.fill_(1.0)
 
 
     no_decay = ["bias", "layer_norm.weight", "layernorm.weight", "norm.weight"]
