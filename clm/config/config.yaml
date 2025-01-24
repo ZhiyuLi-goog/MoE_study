@@ -63,6 +63,9 @@ checkpoint_manager_path: null
 # shuffle train data set
 shuffle: True
 
+# reuse example data
+reuse_example_batch: False
+
 # use float32 in matmul in torch xla
 full_precision: False
 

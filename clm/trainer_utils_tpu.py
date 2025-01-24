@@ -13,6 +13,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+import copy 
 
 import os
 import torch
@@ -77,6 +78,23 @@ def calculate_tflops_training_per_device(model, config):
     )
     return tflops_training_per_device
 
+def load_next_batch(train_iter, example_batch, config):
+  """Loads the next batch. Can keep reusing the same batch for performance reasons"""
+
+  if config.reuse_example_batch > 0 and example_batch is not None:
+    return example_batch
+  else:
+    return next(train_iter)
+def print_tensor(key, tensor, dim):
+    if dim is None:
+        logger.info(f"{key}: dtype={tensor.dtype}, shape={tensor.shape}, mean={tensor.mean()}, min={tensor.min()}, max={tensor.max()}, std={tensor.std()}")
+    else:
+        logger.info( 
+            f"{key} dtype={tensor.dtype}, shape={tensor.shape}\n"
+            f"{key} mean={tensor.mean(dim)}\n"
+            f"{key} min={tensor.min(dim)[0]}\n"
+            f"{key} max={tensor.max(dim)[0]}\n"
+            f"{key} std={tensor.std(dim)}")
 
 class Trainer:
     def __init__(
@@ -132,8 +150,9 @@ class Trainer:
         self.per_device_tflops = calculate_tflops_training_per_device(model, config)
 
     def compute_loss(self, batch, add_load_balancing_loss: bool = False):
-        labels = batch.pop("labels")
-        outputs = self.model(**batch)
+        batch_ = copy.deepcopy(batch)
+        labels = batch_.pop("labels")
+        outputs = self.model(**batch_)
         logits = outputs.logits
         # Flatten the tokens
         shift_logits = logits[..., :-1, :].contiguous()
@@ -157,7 +176,7 @@ class Trainer:
                 outputs.router_logits,
                 self.model.num_experts,
                 self.model.num_experts_per_tok,
-                attention_mask=batch["attention_mask"],
+                attention_mask=batch_["attention_mask"],
             )
             loss += self.model.router_aux_loss_coef * aux_loss
         return loss, metrics
@@ -238,7 +257,16 @@ class Trainer:
         train_num_tokens_list = []
         eval_first = self.config.do_first_eval
         last_step_completion = datetime.datetime.now()
-        for batch_idx, batch in enumerate(self.train_dataloader):
+        example_batch = None
+
+        traindata_iter = iter(self.train_dataloader)
+
+        # for k, v in model.state_dict().items():
+        #     xm.add_step_closure(print_tensor, args=(k, v, None))
+        # xm.mark_step()
+
+        for batch_idx in range(self.config.max_steps):
+            example_batch = load_next_batch(traindata_iter, example_batch, self.config)
             if eval_first:
                 eval_metrics = self.eval_loop()
                 xm.add_step_closure(self.log, args=(eval_metrics,))
@@ -253,7 +281,7 @@ class Trainer:
 
             self.model.train()
             train_loss_step, train_metrics_step = self.compute_loss(
-                batch, add_load_balancing_loss=True
+                example_batch, add_load_balancing_loss=True
             )
             train_num_tokens_step = train_metrics_step["num_tokens"]
 
@@ -303,6 +331,9 @@ class Trainer:
                             callback.on_step_end,
                             args=(self.config, self.state, self.control),
                         )
+
+                # for k, v in self.model.state_dict().items():
+                #     xm.add_step_closure(print_tensor, args=(k, v, None))
 
                 train_loss_list = []
                 train_num_tokens_list = []
