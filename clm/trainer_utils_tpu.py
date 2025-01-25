@@ -261,9 +261,9 @@ class Trainer:
 
         traindata_iter = iter(self.train_dataloader)
 
-        # for k, v in model.state_dict().items():
-        #     xm.add_step_closure(print_tensor, args=(k, v, None))
-        # xm.mark_step()
+        for k, v in self.model.state_dict().items():
+            xm.add_step_closure(print_tensor, args=(k, v, None))
+        xm.mark_step()
 
         for batch_idx in range(self.config.max_steps):
             example_batch = load_next_batch(traindata_iter, example_batch, self.config)
@@ -333,8 +333,8 @@ class Trainer:
                             args=(self.config, self.state, self.control),
                         )
 
-                # for k, v in self.model.state_dict().items():
-                #     xm.add_step_closure(print_tensor, args=(k, v, None))
+                for k, v in self.model.state_dict().items():
+                    xm.add_step_closure(print_tensor, args=(k, v, None))
 
                 train_loss_list = []
                 train_num_tokens_list = []
