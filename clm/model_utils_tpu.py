@@ -262,6 +262,12 @@ def setup_model_optimizer(config):
         del state_dict
         xm.mark_step()
         logger.info("checkpoint loaded")
+        import numpy as np
+        ln_array = np.load('module.module.module.decoder.final_layernorm.weight.npy')
+        norm_weight_from_nemo = torch.from_numpy(ln_array)
+        with torch.no_grad():
+            model.model.norm.weight.copy_(norm_weight_from_nemo)
+        print(torch.mean(model.model.norm.weight, dim=-1))
     else:
         if config.model.config_path:
             model.apply(model._init_weights)
@@ -271,6 +277,18 @@ def setup_model_optimizer(config):
             layer.post_attention_layernorm.weight.data.fill_(1.0)
         model.model.norm.weight.data.fill_(1.0)
 
+    import numpy as np
+    ln_array = np.load('module.module.module.decoder.final_layernorm.weight.npy')
+    norm_weight_from_nemo = torch.from_numpy(ln_array).to(torch.bfloat16)
+    print("np mean", np.mean(ln_array))
+    print("converted_mean", torch.mean(norm_weight_from_nemo, dim=-1))
+
+    with torch.no_grad():
+        model.model.norm.weight.copy_(norm_weight_from_nemo)
+    print(model.model.norm.weight.shape)
+    print("weight mean", torch.mean(model.model.norm.weight, dim=-1))
+    print("shape", model.model.norm.weight.shape)
+    print(model.model.norm.weight)
 
     no_decay = ["bias", "layer_norm.weight", "layernorm.weight", "norm.weight"]
     
