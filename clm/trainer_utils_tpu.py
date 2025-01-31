@@ -179,6 +179,7 @@ class Trainer:
                 attention_mask=batch_["attention_mask"],
             )
             loss += self.model.router_aux_loss_coef * aux_loss
+        del batch_
         return loss, metrics
 
     def eval_loop(self):
@@ -261,12 +262,14 @@ class Trainer:
 
         traindata_iter = iter(self.train_dataloader)
 
-        for k, v in self.model.state_dict().items():
-            xm.add_step_closure(print_tensor, args=(k, v, None))
-        xm.mark_step()
+        # for k, v in self.model.state_dict().items():
+        #     xm.add_step_closure(print_tensor, args=(k, v, None))
+        # xm.mark_step()
 
         for batch_idx in range(self.config.max_steps):
             example_batch = load_next_batch(traindata_iter, example_batch, self.config)
+            xm.mark_step()
+
             if eval_first:
                 eval_metrics = self.eval_loop()
                 xm.add_step_closure(self.log, args=(eval_metrics,))
@@ -289,8 +292,7 @@ class Trainer:
             train_loss_step.backward()
             train_loss_list.append(train_loss_step)
             train_num_tokens_list.append(train_num_tokens_step)
-            xm.mark_step()
-            
+
             if (batch_idx + 1) % self.config.gradient_accumulation_steps == 0:
                 # ensure wrap updating global step to avoid async in lazy printing
                 logs: Dict[str, float] = {}
@@ -333,9 +335,9 @@ class Trainer:
                             callback.on_step_end,
                             args=(self.config, self.state, self.control),
                         )
-                if batch_idx < 3:
-                    for k, v in self.model.state_dict().items():
-                        xm.add_step_closure(print_tensor, args=(k, v, None))
+                # if batch_idx < 3:
+                #     for k, v in self.model.state_dict().items():
+                #         xm.add_step_closure(print_tensor, args=(k, v, None))
 
                 train_loss_list = []
                 train_num_tokens_list = []
