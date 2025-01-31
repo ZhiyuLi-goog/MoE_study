@@ -335,9 +335,9 @@ class Trainer:
                             callback.on_step_end,
                             args=(self.config, self.state, self.control),
                         )
-                # if batch_idx < 3:
-                #     for k, v in self.model.state_dict().items():
-                #         xm.add_step_closure(print_tensor, args=(k, v, None))
+                if batch_idx == 5 or batch_idx == 11:
+                    for k, v in self.model.state_dict().items():
+                        xm.add_step_closure(print_tensor, args=(k, v, None))
 
                 train_loss_list = []
                 train_num_tokens_list = []
