@@ -179,6 +179,10 @@ class Trainer:
                 group_eval_loss_weight.append(eval_loss_weight)
                 group_eval_num_tokens.append(eval_num_tokens)
 
+                logger.info(f"cur iter eval/loss: {eval_loss_mean}")
+                logger.info(f"cur iter eval/eval_num_tokens: {eval_num_tokens}")
+                logger.info(f"cur iter eval/total_weights: {eval_loss_weight}")
+
         total_eval_loss_sum = sum(group_eval_loss_sum)
         total_eval_loss_weight = sum(group_eval_loss_weight)
         total_eval_num_tokens = sum(group_eval_num_tokens)
